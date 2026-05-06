@@ -22,7 +22,7 @@ Write-Host "[*] Initializing environment..."
 
 # 2. Вызываем vcvarsall.bat и запускаем компилятор в том же процессе cmd
 # ИСПРАВЛЕНО: добавлено /link перед флагами линкера, чтобы убрать warning D9002
-$cmd = "call `"$vcVarsPath`" && cl /nologo /EHsc /O2 main.cpp persistence.cpp anti_debug.cpp /link /SUBSYSTEM:WINDOWS /OUT:core.exe kernel32.lib user32.lib advapi32.lib shell32.lib ole32.lib shlwapi.lib && echo [+] Build successful: core.exe || echo [!] Compilation failed"
+$cmd = "call `"$vcVarsPath`" && cl /nologo /EHsc /O2 main.cpp persistence.cpp anti_debug.cpp network.cpp /link /SUBSYSTEM:WINDOWS /OUT:core.exe kernel32.lib user32.lib advapi32.lib shell32.lib ole32.lib shlwapi.lib ws2_32.lib && echo [+] Build successful: core.exe || echo [!] Compilation failed"
 cmd /c $cmd
 
 if ($LASTEXITCODE -eq 0) {

