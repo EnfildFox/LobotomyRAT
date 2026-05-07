@@ -1,0 +1,15 @@
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Realese\net8.0\TitanRAT.C2.exe
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Realese\net8.0\TitanRAT.C2.deps.json
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Realese\net8.0\TitanRAT.C2.runtimeconfig.json
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Realese\net8.0\TitanRAT.C2.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Realese\net8.0\TitanRAT.C2.pdb
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.AssemblyInfoInputs.cache
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.AssemblyInfo.cs
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.csproj.CoreCompileInputs.cache
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.sourcelink.json
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\TitanRAT.C2.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\refint\TitanRAT.C2.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\TitanRAT.C2.pdb
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\Server.genruntimeconfig.cache
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Realese\net8.0\ref\TitanRAT.C2.dll
