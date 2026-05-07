@@ -1,4 +1,4 @@
-// Core/persistence.cpp (v1.4 - Unicode compatible & MSVC fixed)
+// Core/persistence.cpp 
 #include "persistence.h"
 #include <windows.h>
 #include <stdio.h>

