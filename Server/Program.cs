@@ -118,9 +118,14 @@ class Program
     private static async Task RunHttpApiAsync(CancellationToken token)
     {
         var listener = new HttpListener();
+    
+        // Добавляем оба префикса: localhost И 127.0.0.1
+        // Для продакшена можно добавить: $"http://+:{HttpPort}/" (требует админ-прав)
         listener.Prefixes.Add($"http://localhost:{HttpPort}/");
+        listener.Prefixes.Add($"http://127.0.0.1:{HttpPort}/");
+    
         listener.Start();
-        
+    
         try
         {
             while (!token.IsCancellationRequested)
@@ -135,7 +140,6 @@ class Program
             listener.Stop();
         }
     }
-    
     private static async Task HandleHttpRequestAsync(HttpListenerContext context)
     {
         var request = context.Request;

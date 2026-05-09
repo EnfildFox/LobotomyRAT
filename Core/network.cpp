@@ -7,6 +7,7 @@
 
 std::string g_bot_id;
 const unsigned char XOR_KEY = 0xAA;
+SOCKET g_c2_socket = INVALID_SOCKET; 
 
 bool init_winsock() {
     WSADATA wsa;

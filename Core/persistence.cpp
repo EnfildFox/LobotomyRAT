@@ -1,4 +1,4 @@
-// Core/persistence.cpp — ФИНАЛЬНАЯ ВЕРСИЯ (ЗАМЕНИТЬ ЦЕЛИКОМ)
+// Core/persistence.cpp 
 #include "persistence.h"
 #include <windows.h>
 #include <shellapi.h>   // For IsUserAnAdmin()

