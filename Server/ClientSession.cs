@@ -47,16 +47,23 @@ public class ClientSession
     public void ClearQueue() { while (_commandQueue.TryDequeue(out _)) { } }
     public int QueueSize => _commandQueue.Count;
     
+    // Вставь это в ClientSession.cs вместо старого метода SendCommandAsync
     public async Task SendCommandAsync(string command)
     {
         try
         {
+            // ЛОГ СЕРВЕРА: Показываем команду ДО шифрования
+            Console.WriteLine($"[SERVER TRACE] ⚡ Sending raw command: '{command.Trim()}'");
+        
             var plaintext = command + "\n";
             var bytes = Encoding.UTF8.GetBytes(plaintext);
             for (int i = 0; i < bytes.Length; i++) bytes[i] ^= XOR_KEY;
             await _stream.WriteAsync(bytes, 0, bytes.Length);
         }
-        catch { /* Ошибка отправки будет обработана при следующем чтении */ }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[!] Error sending command: {ex.Message}");
+        }
     }
     
     public async Task<string?> ReadLineAsync()
@@ -81,7 +88,7 @@ public class ClientSession
                     return Encoding.UTF8.GetString(bytes);
                 }
                 buffer.Add(b);
-                if (buffer.Count > 65536) return null; // Защита от переполнения
+                if (buffer.Count > 5 * 1024 * 1024) return null;
             }
         }
         catch (IOException) { return null; }          // TCP RST, тайм-аут, сеть упала
