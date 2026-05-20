@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "DcmTRJeTS0Y=",
+  "dgSpecHash": "XOm6WM2jANk=",
   "success": true,
   "projectFilePath": "C:\\Users\\enfil\\OneDrive\\Документы\\WDDarkProjects\\DarkProject\\Server\\Server.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\enfil\\.nuget\\packages\\system.text.encoding.codepages\\10.0.8\\system.text.encoding.codepages.10.0.8.nupkg.sha512"
+  ],
   "logs": []
 }

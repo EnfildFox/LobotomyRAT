@@ -1,0 +1,7 @@
+// Core/config.json
+{
+    "c2_ip": "127.0.0.1",
+    "c2_port": 12345,
+    "heartbeat_interval": 5,
+    "auto_delete_days": 60
+}

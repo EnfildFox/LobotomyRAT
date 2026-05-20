@@ -13,3 +13,7 @@ C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj
 C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Release\net8.0\TitanRAT.C2.pdb
 C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Release\net8.0\Server.genruntimeconfig.cache
 C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Release\net8.0\ref\TitanRAT.C2.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Release\net8.0\System.Text.Encoding.CodePages.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\bin\Release\net8.0\runtimes\win\lib\net8.0\System.Text.Encoding.CodePages.dll
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Release\net8.0\Server.csproj.AssemblyReference.cache
+C:\Users\enfil\OneDrive\Документы\WDDarkProjects\DarkProject\Server\obj\Release\net8.0\Server.csproj.Up2Date
