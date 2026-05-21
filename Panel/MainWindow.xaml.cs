@@ -16,7 +16,7 @@ using System.Windows.Media;
 
 namespace SafeOps.Panel;
 
-public sealed class ClientInfo : INotifyPropertyChanged
+public sealed class BotInfo : INotifyPropertyChanged
 {
     private string _status = "offline";
 
@@ -85,7 +85,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         WriteIndented = true
     };
 
-    private readonly ObservableCollection<ClientInfo> _clients = [];
+    private readonly ObservableCollection<BotInfo> _clients = [];
     private readonly ObservableCollection<ResponseEntry> _responses = [];
     private readonly string _settingsPath;
     private readonly Timer _refreshTimer;
@@ -94,7 +94,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _isRefreshing;
     private string _statusText = "Ожидание";
     private string _footerText = "Готово";
-    private string _lastRefreshText = "ещё не обновлялось";
+    private string _lastRefreshText = "еще не обновлялось";
     private Brush _connectionBrush = Brushes.Gray;
 
     public MainWindow()
@@ -138,7 +138,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         await LoadSettingsAsync();
         ApplySettingsToControls();
-        RecreateHttpClient();
+
+        if (!TryRecreateHttpClient())
+        {
+            return;
+        }
+
         ScheduleRefresh();
         await RefreshDataAsync();
     }
@@ -154,9 +159,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             await using var stream = File.OpenRead(_settingsPath);
             _settings = await JsonSerializer.DeserializeAsync<PanelSettings>(stream, JsonOptions) ?? new PanelSettings();
+            _settings.ServerAddress = NormalizeServerAddress(_settings.ServerAddress);
             _settings.RefreshIntervalSeconds = Math.Clamp(_settings.RefreshIntervalSeconds, 1, 3600);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             AddLocalLog("settings", $"Не удалось прочитать настройки: {ex.Message}");
         }
@@ -172,23 +178,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private PanelSettings ReadSettingsFromControls()
     {
-        var address = ServerAddressTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(address))
-        {
-            address = "http://localhost:12346";
-        }
-
-        if (!int.TryParse(RefreshIntervalTextBox.Text.Trim(), out var interval))
+        if (!int.TryParse(RefreshIntervalTextBox?.Text?.Trim(), out var interval))
         {
             interval = 2;
         }
 
         return new PanelSettings
         {
-            ServerAddress = address.TrimEnd('/'),
-            AutoRefresh = AutoRefreshCheckBox.IsChecked == true,
+            ServerAddress = NormalizeServerAddress(ServerAddressTextBox?.Text ?? _settings.ServerAddress),
+            AutoRefresh = AutoRefreshCheckBox?.IsChecked ?? _settings.AutoRefresh,
             RefreshIntervalSeconds = Math.Clamp(interval, 1, 3600)
         };
+    }
+
+    private static string NormalizeServerAddress(string? address)
+    {
+        address = string.IsNullOrWhiteSpace(address)
+            ? "http://localhost:12346"
+            : address.Trim();
+
+        return address.TrimEnd('/');
     }
 
     private void ApplySettingsToControls()
@@ -198,20 +207,38 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         RefreshIntervalTextBox.Text = _settings.RefreshIntervalSeconds.ToString();
     }
 
-    private void RecreateHttpClient()
+    private bool TryRecreateHttpClient()
     {
+        var baseAddress = NormalizeServerAddress(_settings.ServerAddress);
+        if (!Uri.TryCreate(baseAddress + "/", UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            StatusText = "Ошибка";
+            FooterText = "Адрес API должен быть абсолютным HTTP/HTTPS URL.";
+            ConnectionBrush = Brushes.OrangeRed;
+            AddLocalLog("settings", FooterText);
+            return false;
+        }
+
         _httpClient.Dispose();
         _httpClient = new HttpClient
         {
-            BaseAddress = new Uri(_settings.ServerAddress.TrimEnd('/') + "/"),
+            BaseAddress = uri,
             Timeout = TimeSpan.FromSeconds(8)
         };
+
+        return true;
     }
 
     private void ScheduleRefresh()
     {
-        var dueTime = _settings.AutoRefresh ? TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds) : Timeout.InfiniteTimeSpan;
-        var period = _settings.AutoRefresh ? TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds) : Timeout.InfiniteTimeSpan;
+        var dueTime = _settings.AutoRefresh
+            ? TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds)
+            : Timeout.InfiniteTimeSpan;
+        var period = _settings.AutoRefresh
+            ? TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds)
+            : Timeout.InfiniteTimeSpan;
+
         _refreshTimer.Change(dueTime, period);
     }
 
@@ -226,7 +253,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await Dispatcher.InvokeAsync(() =>
         {
             StatusText = "Обновление";
-            FooterText = "Запрашиваю список клиентов и ответы сервера...";
+            FooterText = "Запрашиваю список узлов и ответы безопасного API...";
             ConnectionBrush = Brushes.Goldenrod;
         });
 
@@ -238,7 +265,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 LastRefreshText = $"обновлено {DateTime.Now:HH:mm:ss}";
                 StatusText = "Онлайн";
-                FooterText = $"Клиентов: {_clients.Count}. Последнее обновление прошло без ошибок.";
+                FooterText = $"Узлов: {_clients.Count}. Последнее обновление прошло без ошибок.";
                 ConnectionBrush = Brushes.LimeGreen;
             });
         }
@@ -248,7 +275,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 StatusText = "Нет связи";
                 FooterText = ex is TaskCanceledException
-                    ? "Сервер не ответил за отведённое время."
+                    ? "Сервер не ответил за отведенное время."
                     : $"Ошибка подключения: {ex.Message}";
                 ConnectionBrush = Brushes.OrangeRed;
                 AddLocalLog("network", FooterText);
@@ -265,7 +292,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         using var response = await _httpClient.GetAsync("clients");
         response.EnsureSuccessStatusCode();
 
-        var clients = await response.Content.ReadFromJsonAsync<ClientInfo[]>(JsonOptions) ?? [];
+        var clients = await response.Content.ReadFromJsonAsync<BotInfo[]>(JsonOptions) ?? [];
         await Dispatcher.InvokeAsync(() =>
         {
             _clients.Clear();
@@ -317,9 +344,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task SendDiagnosticAsync()
     {
-        if (ClientsGrid.SelectedItem is not ClientInfo selected)
+        if (ClientsGrid.SelectedItem is not BotInfo selected)
         {
-            MessageBox.Show("Выберите клиента из списка.", "SafeOps", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Выберите узел из списка.", "SafeOps", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -392,11 +419,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             await SaveSettingsAsync();
-            RecreateHttpClient();
-            ScheduleRefresh();
-            FooterText = "Настройки сохранены и применены.";
+            if (TryRecreateHttpClient())
+            {
+                ScheduleRefresh();
+                FooterText = "Настройки сохранены и применены.";
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UriFormatException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             MessageBox.Show($"Не удалось сохранить настройки: {ex.Message}", "SafeOps", MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -405,14 +434,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void TestConnectionButton_Click(object sender, RoutedEventArgs e)
     {
         _settings = ReadSettingsFromControls();
+        if (!TryRecreateHttpClient())
+        {
+            return;
+        }
 
         try
         {
-            RecreateHttpClient();
             using var response = await _httpClient.GetAsync("clients");
             FooterText = response.IsSuccessStatusCode
-                ? "Связь проверена: сервер отвечает."
-                : $"Сервер ответил статусом {(int)response.StatusCode}.";
+                ? "Связь проверена: API отвечает."
+                : $"API ответил статусом {(int)response.StatusCode}.";
             StatusText = response.IsSuccessStatusCode ? "Онлайн" : "Ошибка";
             ConnectionBrush = response.IsSuccessStatusCode ? Brushes.LimeGreen : Brushes.OrangeRed;
             AddLocalLog("network", FooterText);
