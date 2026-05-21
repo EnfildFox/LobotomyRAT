@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TitanRAT.C2")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4a92a11860f089228185e9a689eea0e9ccb1c15a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fe8a04bbc92d217cfd31ca1231d5c18fa5aa7f38")]
 [assembly: System.Reflection.AssemblyProductAttribute("TitanRAT.C2")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TitanRAT.C2")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

