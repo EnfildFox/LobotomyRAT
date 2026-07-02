@@ -46,7 +46,7 @@ bool compress_xpress(const std::vector<uint8_t>& input, std::vector<uint8_t>& co
 bool decompress_xpress(const std::vector<uint8_t>& compressed, std::vector<uint8_t>& output) {
     if (!init_ntdll() || compressed.empty()) return false;
     ULONG wsSize = 0, fsSize = 0;
-    // Получаем размер рабочего буфера ивыделяем его
+    // Получаем размер рабочего буфера ивыделяем его 
     if (RtlGetCompressionWorkSpaceSize(COMPRESSION_FORMAT_XPRESS, &wsSize, &fsSize) != 0) return false;
     std::vector<uint8_t> workspace(wsSize + fsSize);
     // Нам нужно знать несжатый размер. Для упрощения выделим буфер 2 МБ.

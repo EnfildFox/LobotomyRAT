@@ -26,15 +26,18 @@ public class ClientSession
         _stream = client.GetStream();
     }
 
+    //Добавление команды в очередь и извлечение
     public void EnqueueCommand(string command) => _commandQueue.Enqueue(command);
     public string? GetPendingCommand() => _commandQueue.TryDequeue(out var cmd) ? cmd : null;
 
+    //Добавляет ответ в историю, обрезает до 200
     public void AddResponse(string response)
     {
         _responseHistory.Enqueue(response);
         while (_responseHistory.Count > MAX_HISTORY) _responseHistory.TryDequeue(out _);
     }
 
+    // Получение последних N ответов, очистка очереди, размер очереди
     public IEnumerable<string> GetRecentResponses(int count = 20) => _responseHistory.Reverse().Take(count);
     public void ClearQueue() { while (_commandQueue.TryDequeue(out _)) { } }
     public int QueueSize => _commandQueue.Count;
