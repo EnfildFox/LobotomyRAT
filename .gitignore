@@ -1,0 +1,35 @@
+# .gitignore — C++ / MSVC / Windows
+
+# Build artifacts
+bin/
+obj/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.tlog
+*.log
+*.manifest
+*.res
+
+# Visual Studio / MSBuild
+.vs/
+*.vcxproj.*
+*.sln
+*.suo
+ipch/
+*.user
+*.filters
+
+# Debug/Tools
+DebugView*
+*.zip
+*.rar
+*.7z
+
+# Local config (contains real IPs/keys)
+Core/config.json
+Panel/**/panel_settings.json
+
+# Keep template if needed
+!Core/config.example.json

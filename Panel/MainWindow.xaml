@@ -1,0 +1,343 @@
+<!-- MainWindow.xaml — удалён лишний MenuItem из стиля DataGridRow -->
+<Window x:Class="SafeOps.Panel.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="LobotomyRAT"
+        Width="1120"
+        Height="720"
+        MinWidth="920"
+        MinHeight="600"
+        Background="#0F172A"
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBackground" Color="#111827"/>
+        <SolidColorBrush x:Key="PanelBorder" Color="#263244"/>
+        <SolidColorBrush x:Key="FieldBackground" Color="#0B1220"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#F8FAFC"/>
+        <SolidColorBrush x:Key="TextMuted" Color="#94A3B8"/>
+        <SolidColorBrush x:Key="Accent" Color="#38BDF8"/>
+        <SolidColorBrush x:Key="AccentStrong" Color="#0EA5E9"/>
+
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#38BDF8"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#F8FAFC"/>
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#1E293B"/>
+
+        <ContextMenu x:Key="RowContextMenu">
+            <MenuItem Header="PING" Click="ContextMenuPing_Click"/>
+            <MenuItem Header="SCREENSHOT" Click="ContextMenuScreenshot_Click"/>
+            <MenuItem Header="INFO" Click="ContextMenuInfo_Click"/>
+            <MenuItem Header="SHELL" Click="ContextMenuShell_Click"/>
+            <MenuItem Header="FILE MANAGER" Click="ContextMenuFileManager_Click"/>
+        </ContextMenu>
+
+        <!-- Стили (остальные без изменений) -->
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+        </Style>
+
+        <Style x:Key="MutedText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Foreground" Value="#F8FAFC"/>
+            <Setter Property="Background" Value="#1E293B"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#26364B"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource AccentStrong}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentStrong}"/>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource FieldBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,7"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="CaretBrush" Value="{StaticResource Accent}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="Padding" Value="18,10"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="#111827"
+                                BorderBrush="#263244"
+                                BorderThickness="1"
+                                CornerRadius="8,8,0,0">
+                            <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#1E293B"/>
+                                <Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="{StaticResource FieldBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="RowBackground" Value="#0B1220"/>
+            <Setter Property="AlternatingRowBackground" Value="#111A2D"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#1E293B"/>
+            <Setter Property="VerticalGridLinesBrush" Value="#1E293B"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#111827"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="BorderBrush" Value="#263244"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+        </Style>
+
+        <Style TargetType="DataGridRow">
+            <EventSetter Event="MouseRightButtonDown" Handler="DataGridRow_MouseRightButtonDown"/>
+            <Setter Property="ContextMenu" Value="{StaticResource RowContextMenu}"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Accent}"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Background="#111827" BorderBrush="#263244" BorderThickness="0,0,0,1" Padding="24,18">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="LobotomyRAT" FontSize="24" FontWeight="SemiBold"/>
+                    <TextBlock Text="Система мониторинга и диагностики" Style="{StaticResource MutedText}" Margin="0,5,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="10" Height="10" Fill="{Binding ConnectionBrush}" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1" Margin="24">
+            <TabItem Header="Мониторинг">
+                <Grid Margin="0,18,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Узлы" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock Text="Список обновляется автоматически; статус считается по последнему heartbeat" Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Обновить" Click="RefreshButton_Click" Margin="0,0,10,0"/>
+                            <TextBlock Grid.Column="2" Text="{Binding LastRefreshText}" Style="{StaticResource MutedText}" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <DataGrid x:Name="ClientsGrid"
+                              Grid.Row="1"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              IsReadOnly="True"
+                              SelectionMode="Single"
+                              SelectionUnit="FullRow">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="2*"/>
+                            <DataGridTextColumn Header="Hostname" Binding="{Binding Hostname}" Width="1.4*"/>
+                            <DataGridTextColumn Header="LastSeen" Binding="{Binding LastSeenLocal}" Width="1.3*"/>
+                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="110"/>
+                            <DataGridTextColumn Header="Queue" Binding="{Binding QueueSize}" Width="80"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Логи">
+                <Grid Margin="0,18,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="История событий" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock Text="Ответы сервера и локальные события" Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                            </StackPanel>
+                            <Button Content="Очистить логи" HorizontalAlignment="Right" Click="ClearLogsButton_Click"/>
+                        </Grid>
+                    </Border>
+                    <DataGrid x:Name="LogsGrid"
+                              Grid.Row="1"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Time" Binding="{Binding TimeLocal}" Width="160"/>
+                            <DataGridTextColumn Header="Source" Binding="{Binding Hostname}" Width="160"/>
+                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Настройки">
+                <Grid Margin="0,18,0,0">
+                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="22" MaxWidth="640" HorizontalAlignment="Left" VerticalAlignment="Top">
+                        <StackPanel>
+                            <TextBlock Text="Подключение" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="Настройки сохраняются в panel_settings.json" Style="{StaticResource MutedText}" Margin="0,4,0,18"/>
+
+                            <TextBlock Text="Адрес API сервера" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="ServerAddressTextBox" Text="http://localhost:12346" Margin="0,0,0,16"/>
+
+                            <CheckBox x:Name="AutoRefreshCheckBox"
+                                      Content="Автообновление списка узлов"
+                                      IsChecked="True"
+                                      Margin="0,0,0,16"
+                                      Checked="AutoRefreshCheckBox_Changed"
+                                      Unchecked="AutoRefreshCheckBox_Changed"/>
+
+                            <TextBlock Text="Интервал обновления, секунды" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <Grid Margin="0,0,0,18">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="90"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Content="-" Width="38" Click="DecreaseIntervalButton_Click"/>
+                                <TextBox x:Name="RefreshIntervalTextBox" Grid.Column="1" Text="2" TextAlignment="Center" Margin="8,0"/>
+                                <Button Grid.Column="2" Content="+" Width="38" Click="IncreaseIntervalButton_Click"/>
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Сохранить" Style="{StaticResource PrimaryButton}" Click="SaveSettingsButton_Click" Margin="0,0,10,0"/>
+                                <Button Content="Проверить связь" Click="TestConnectionButton_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Билдер">
+                <Grid Margin="0,18,0,0">
+                    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource PanelBorder}" BorderThickness="1" CornerRadius="8" Padding="22" MaxWidth="640" HorizontalAlignment="Left" Width="642">
+                        <StackPanel>
+                            <TextBlock Text="Генерация агента" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,18" Width="1023"/>
+                            <TextBlock Text="IP сервера" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderIpTextBox" Text="127.0.0.1" Margin="0,0,0,16"/>
+                            <TextBlock Text="Порт сервера" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderPortTextBox" Text="12345" Margin="0,0,0,16"/>
+                            <TextBlock Text="Метод постоянства" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="BuilderPersistenceComboBox" Margin="0,0,0,16">
+                                <ComboBoxItem Content="None" IsSelected="True"/>
+                                <ComboBoxItem Content="Registry"/>
+                                <ComboBoxItem Content="TaskScheduler"/>
+                                <ComboBoxItem Content="Both"/>
+                            </ComboBox>
+                            <TextBlock Text="Уровень антиотладки" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <ComboBox x:Name="BuilderAntiDebugComboBox" Margin="0,0,0,16">
+                                <ComboBoxItem Content="1 (базовый)"/>
+                                <ComboBoxItem Content="2 (средний)" IsSelected="True"/>
+                                <ComboBoxItem Content="3 (максимальный)"/>
+                            </ComboBox>
+                            <TextBlock Text="Автоудаление (дни)" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <TextBox x:Name="BuilderAutoDeleteTextBox" Text="60" Margin="0,0,0,16"/>
+                            <TextBlock Text="Включить модули" Foreground="{StaticResource TextMuted}" Margin="0,0,0,6"/>
+                            <CheckBox x:Name="BuilderModuleScreenshot" Content="screenshot" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleKeylogger" Content="keylogger" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleShell" Content="shell" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleFilemgr" Content="filemgr" Margin="0,2"/>
+                            <CheckBox x:Name="BuilderModuleStealer" Content="stealer" Margin="0,2"/>
+                            <Button x:Name="BuilderGenerateButton" Content="Собрать агента" Style="{StaticResource PrimaryButton}" Width="160" Height="40" Click="BuilderGenerateButton_Click" Margin="0,20,0,0"/>
+                            <TextBlock x:Name="BuilderResultTextBlock" Foreground="{StaticResource TextMuted}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="2" Background="#0B1220" BorderBrush="#263244" BorderThickness="0,1,0,0" Padding="18,9">
+            <TextBlock Text="{Binding FooterText}" Foreground="{StaticResource TextMuted}"/>
+        </Border>
+    </Grid>
+</Window>
