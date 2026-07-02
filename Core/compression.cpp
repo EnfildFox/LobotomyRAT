@@ -1,4 +1,3 @@
-// Core/compression.cpp
 #include "compression.h"
 #include <ntstatus.h>
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
@@ -30,7 +29,8 @@ bool compress_xpress(const std::vector<uint8_t>& input, std::vector<uint8_t>& co
     if (!init_ntdll() || input.empty()) return false;
     ULONG wsSize = 0, fsSize = 0;
     if (RtlGetCompressionWorkSpaceSize(COMPRESSION_FORMAT_XPRESS, &wsSize, &fsSize) != 0) return false;
-    std::vector<uint8_t> workspace(wsSize + fsSize);
+    std::vector<uint8_t> workspace(wsSize + fsSize); // выделяем рабочий буфер суммарного размера
+    // буфер для сжатыъх данных
     ULONG compressedSize = input.size() + 8; // минимальный запас
     compressed.resize(compressedSize);
     ULONG finalSize = 0;
@@ -46,6 +46,7 @@ bool compress_xpress(const std::vector<uint8_t>& input, std::vector<uint8_t>& co
 bool decompress_xpress(const std::vector<uint8_t>& compressed, std::vector<uint8_t>& output) {
     if (!init_ntdll() || compressed.empty()) return false;
     ULONG wsSize = 0, fsSize = 0;
+    // Получаем размер рабочего буфера ивыделяем его
     if (RtlGetCompressionWorkSpaceSize(COMPRESSION_FORMAT_XPRESS, &wsSize, &fsSize) != 0) return false;
     std::vector<uint8_t> workspace(wsSize + fsSize);
     // Нам нужно знать несжатый размер. Для упрощения выделим буфер 2 МБ.

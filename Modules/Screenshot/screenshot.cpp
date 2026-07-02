@@ -1,3 +1,4 @@
+//пока не работает
 #include <windows.h>
 #include <stdio.h>
 
@@ -7,6 +8,7 @@ struct ModuleAPI {
     const char* (*get_command)(const char* key);
 };
 
+//точка входа модуля, вызываемая агентом после рефлективной загрузки
 extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     if (!api) return -1;
     api->log("[SCREENSHOT] Module loaded, Run called\n");
@@ -14,6 +16,7 @@ extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     return 0;
 }
 
+// вызывается при загрузке ивыгрузке длл
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     return TRUE;
 }

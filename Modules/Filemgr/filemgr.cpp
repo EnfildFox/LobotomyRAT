@@ -1,4 +1,3 @@
-// Modules/FileManager/filemgr.cpp — STABLE & FIXED VERSION
 // Компиляция: cl /LD /MT /O2 filemgr.cpp /Fe:filemgr.dll kernel32.lib user32.lib
 
 #include "filemgr.h"
@@ -10,7 +9,7 @@
 static volatile bool g_running = false;
 static ModuleAPI* g_api = nullptr;
 
-// Логирование
+// логирование
 void fm_log(const char* msg) {
     if (!msg) return;
     CreateDirectoryA("C:\\temp", NULL);
@@ -24,9 +23,9 @@ void fm_log(const char* msg) {
     if (g_api && g_api->log) g_api->log(msg);
 }
 
-// ============================================================================
-// Base64 (Исправлены операторы << и >>)
-// ============================================================================
+// ==========================================================================
+// Base64 
+//============================================================================
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 char* Base64Encode(const unsigned char* data, size_t len, size_t* out_len) {
@@ -85,8 +84,8 @@ unsigned char* Base64Decode(const char* data, size_t* out_len) {
 }
 
 // ============================================================================
-// JSON Helpers (Исправлено экранирование кавычек И переполнение буфера)
-// ============================================================================
+// JSON Helpers
+//=============================================================================
 void SendJsonError(ModuleAPI* api, const char* cmd, const char* msg) {
     if (!api || !api->send_result) return;
     char buf[1024];
@@ -110,7 +109,7 @@ void SendJsonResult(ModuleAPI* api, const char* cmd, const char* data) {
 }
 
 // ============================================================================
-// Обработчики
+// \обработчики
 // ============================================================================
 void HandleDir(const char* path, ModuleAPI* api) {
     fm_log("HandleDir started.\n");
@@ -125,7 +124,7 @@ void HandleDir(const char* path, ModuleAPI* api) {
         SendJsonError(api, "dir", err); return;
     }
 
-    // ✅ БЕЗОПАСНОСТЬ: Динамическая память (256 КБ)
+    // Динамическая память (256 КБ)
     size_t buf_size = 256 * 1024;
     char* json = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buf_size);
     if (!json) { SendJsonError(api, "dir", "Mem alloc failed"); FindClose(hFind); return; }
@@ -290,6 +289,7 @@ DWORD WINAPI WorkerThread(LPVOID param) {
     return 0;
 }
 
+// Точка входа модуля, вызываемая агентом после рефлективной загрузки
 extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     if (!api || !api->send_result) return -1;
     HANDLE h = CreateThread(NULL, 0, WorkerThread, api, 0, NULL);
@@ -298,6 +298,7 @@ extern "C" __declspec(dllexport) int __stdcall Run(ModuleAPI* api) {
     return 0;
 }
 
+// Необходимо вызывать при загрузке и выгрузке
 BOOL APIENTRY DllMain(HMODULE h, DWORD r, LPVOID l) {
     if (r == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(h);
     if (r == DLL_PROCESS_DETACH) { g_running = false; }

